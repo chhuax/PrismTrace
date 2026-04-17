@@ -15,7 +15,10 @@ pub fn evaluate_target(target: &ProcessTarget) -> AttachReadiness {
 }
 
 fn classify_target(target: &ProcessTarget) -> (AttachReadinessStatus, String) {
-    let path = target.executable_path.to_string_lossy().to_ascii_lowercase();
+    let path = target
+        .executable_path
+        .to_string_lossy()
+        .to_ascii_lowercase();
 
     if path.starts_with("/system/")
         || path.starts_with("/usr/libexec/")

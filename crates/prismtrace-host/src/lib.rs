@@ -3,8 +3,8 @@ pub mod readiness;
 
 use discovery::{ProcessSampleSource, discover_targets};
 use prismtrace_core::{AttachReadiness, ProcessTarget};
-use readiness::evaluate_targets;
 use prismtrace_storage::StorageLayout;
+use readiness::evaluate_targets;
 use std::io;
 use std::path::PathBuf;
 
@@ -123,7 +123,12 @@ pub fn readiness_report(snapshot: &ReadinessSnapshot) -> String {
         ),
     ];
 
-    report.extend(snapshot.readiness_results.iter().map(AttachReadiness::summary));
+    report.extend(
+        snapshot
+            .readiness_results
+            .iter()
+            .map(AttachReadiness::summary),
+    );
 
     report.join("\n")
 }
@@ -131,8 +136,8 @@ pub fn readiness_report(snapshot: &ReadinessSnapshot) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppConfig, DEFAULT_BIND_ADDR, bootstrap, collect_host_snapshot,
-        collect_readiness_snapshot, startup_summary,
+        AppConfig, DEFAULT_BIND_ADDR, bootstrap, collect_host_snapshot, collect_readiness_snapshot,
+        startup_summary,
     };
     use crate::discovery::StaticProcessSampleSource;
     use prismtrace_core::ProcessSample;
