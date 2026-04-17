@@ -28,9 +28,7 @@ pub struct PsProcessSampleSource;
 
 impl ProcessSampleSource for PsProcessSampleSource {
     fn collect_samples(&self) -> io::Result<Vec<ProcessSample>> {
-        let output = Command::new("ps")
-            .args(["-axo", "pid=,comm="])
-            .output()?;
+        let output = Command::new("ps").args(["-axo", "pid=,comm="]).output()?;
 
         if !output.status.success() {
             return Err(io::Error::other("ps command failed"));

@@ -73,7 +73,10 @@ impl ProcessSample {
 
     pub fn normalized_app_name(&self) -> String {
         let is_generic_runtime_name = matches!(
-            (self.runtime_kind(), self.process_name.to_ascii_lowercase().as_str()),
+            (
+                self.runtime_kind(),
+                self.process_name.to_ascii_lowercase().as_str()
+            ),
             (RuntimeKind::Node, "node") | (RuntimeKind::Electron, "electron")
         );
 
@@ -180,9 +183,7 @@ mod tests {
         let sample = ProcessSample {
             pid: 8,
             process_name: "Electron".into(),
-            executable_path: PathBuf::from(
-                "/Applications/Electron.app/Contents/MacOS/Electron",
-            ),
+            executable_path: PathBuf::from("/Applications/Electron.app/Contents/MacOS/Electron"),
         };
 
         assert_eq!(sample.runtime_kind(), RuntimeKind::Electron);

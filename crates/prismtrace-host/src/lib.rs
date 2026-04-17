@@ -95,9 +95,7 @@ pub fn discovery_report(snapshot: &HostSnapshot) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        AppConfig, DEFAULT_BIND_ADDR, bootstrap, collect_host_snapshot, startup_summary,
-    };
+    use super::{AppConfig, DEFAULT_BIND_ADDR, bootstrap, collect_host_snapshot, startup_summary};
     use crate::discovery::StaticProcessSampleSource;
     use prismtrace_core::ProcessSample;
     use std::fs;
@@ -110,7 +108,10 @@ mod tests {
     fn app_config_uses_a_hidden_state_directory_inside_the_workspace() {
         let config = AppConfig::from_workspace_root("/tmp/prismtrace-workspace");
 
-        assert_eq!(config.workspace_root, PathBuf::from("/tmp/prismtrace-workspace"));
+        assert_eq!(
+            config.workspace_root,
+            PathBuf::from("/tmp/prismtrace-workspace")
+        );
         assert_eq!(
             config.state_root,
             PathBuf::from("/tmp/prismtrace-workspace/.prismtrace")
@@ -126,7 +127,8 @@ mod tests {
         assert_eq!(result.config.workspace_root, workspace_root);
         assert_eq!(
             result.storage.db_path,
-            result.config
+            result
+                .config
                 .state_root
                 .join("state")
                 .join("observability.db")
@@ -145,9 +147,7 @@ mod tests {
 
         assert!(summary.contains("PrismTrace host skeleton"));
         assert!(summary.contains(DEFAULT_BIND_ADDR));
-        assert!(summary.contains(
-            result.storage.db_path.to_string_lossy().as_ref()
-        ));
+        assert!(summary.contains(result.storage.db_path.to_string_lossy().as_ref()));
 
         fs::remove_dir_all(result.config.state_root)?;
         Ok(())
@@ -182,8 +182,14 @@ mod tests {
         assert_eq!(snapshot.discovered_targets.len(), 3);
         assert!(snapshot.summary.contains("PrismTrace host skeleton"));
         assert_eq!(snapshot.discovered_targets[0].app_name, "node");
-        assert_eq!(snapshot.discovered_targets[1].runtime_kind.label(), "electron");
-        assert_eq!(snapshot.discovered_targets[2].runtime_kind.label(), "unknown");
+        assert_eq!(
+            snapshot.discovered_targets[1].runtime_kind.label(),
+            "electron"
+        );
+        assert_eq!(
+            snapshot.discovered_targets[2].runtime_kind.label(),
+            "unknown"
+        );
 
         fs::remove_dir_all(result.config.state_root)?;
         Ok(())
@@ -223,10 +229,6 @@ mod tests {
             .expect("system time before unix epoch")
             .as_nanos();
 
-        std::env::temp_dir().join(format!(
-            "prismtrace-host-test-{}-{}",
-            process::id(),
-            nanos
-        ))
+        std::env::temp_dir().join(format!("prismtrace-host-test-{}-{}", process::id(), nanos))
     }
 }
