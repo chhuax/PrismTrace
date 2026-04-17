@@ -73,7 +73,10 @@ impl ProcessSample {
 
     pub fn normalized_app_name(&self) -> String {
         let is_generic_runtime_name = matches!(
-            (self.runtime_kind(), self.process_name.to_ascii_lowercase().as_str()),
+            (
+                self.runtime_kind(),
+                self.process_name.to_ascii_lowercase().as_str()
+            ),
             (RuntimeKind::Node, "node") | (RuntimeKind::Electron, "electron")
         );
 
@@ -95,6 +98,44 @@ impl ProcessSample {
             executable_path: self.executable_path.clone(),
             runtime_kind: self.runtime_kind(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachReadinessStatus {
+    Supported,
+    Unsupported,
+    PermissionDenied,
+    Unknown,
+}
+
+impl AttachReadinessStatus {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Supported => "supported",
+            Self::Unsupported => "unsupported",
+            Self::PermissionDenied => "permission_denied",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachReadiness {
+    pub target: ProcessTarget,
+    pub status: AttachReadinessStatus,
+    pub reason: String,
+}
+
+impl AttachReadiness {
+    pub fn summary(&self) -> String {
+        format!(
+            "[{}] {} (pid {}): {}",
+            self.status.label(),
+            self.target.display_name(),
+            self.target.pid,
+            self.reason
+        )
     }
 }
 
@@ -131,7 +172,10 @@ impl ProbeHealth {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProbeHealth, ProbeState, ProcessSample, ProcessTarget, RuntimeKind};
+    use super::{
+        AttachReadiness, AttachReadinessStatus, ProbeHealth, ProbeState, ProcessSample,
+        ProcessTarget, RuntimeKind,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -180,9 +224,7 @@ mod tests {
         let sample = ProcessSample {
             pid: 8,
             process_name: "Electron".into(),
-            executable_path: PathBuf::from(
-                "/Applications/Electron.app/Contents/MacOS/Electron",
-            ),
+            executable_path: PathBuf::from("/Applications/Electron.app/Contents/MacOS/Electron"),
         };
 
         assert_eq!(sample.runtime_kind(), RuntimeKind::Electron);
@@ -225,5 +267,35 @@ mod tests {
         assert_eq!(target.pid, 11);
         assert_eq!(target.app_name, "Codex");
         assert_eq!(target.runtime_kind, RuntimeKind::Unknown);
+    }
+
+    #[test]
+    fn attach_readiness_status_labels_are_stable() {
+        assert_eq!(AttachReadinessStatus::Supported.label(), "supported");
+        assert_eq!(AttachReadinessStatus::Unsupported.label(), "unsupported");
+        assert_eq!(
+            AttachReadinessStatus::PermissionDenied.label(),
+            "permission_denied"
+        );
+        assert_eq!(AttachReadinessStatus::Unknown.label(), "unknown");
+    }
+
+    #[test]
+    fn attach_readiness_summary_includes_status_and_reason() {
+        let readiness = AttachReadiness {
+            target: ProcessTarget {
+                pid: 501,
+                app_name: "Codex".into(),
+                executable_path: PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex"),
+                runtime_kind: RuntimeKind::Unknown,
+            },
+            status: AttachReadinessStatus::Unknown,
+            reason: "runtime classification is not strong enough yet".into(),
+        };
+
+        assert_eq!(
+            readiness.summary(),
+            "[unknown] Codex (pid 501): runtime classification is not strong enough yet"
+        );
     }
 }

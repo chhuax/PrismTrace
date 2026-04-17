@@ -10,9 +10,11 @@ surfaces:
     inputs:
       - current working directory as workspace root
       - optional --discover flag
+      - optional --readiness flag
     outputs:
       - startup summary
       - process discovery report
+      - attach readiness report
 
   - id: prismtrace-core-domain
     kind: library
