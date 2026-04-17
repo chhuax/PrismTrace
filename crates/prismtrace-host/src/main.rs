@@ -12,6 +12,16 @@ fn main() -> std::io::Result<()> {
         return Ok(());
     }
 
+    if args.iter().any(|arg| arg == "--readiness") {
+        let snapshot = prismtrace_host::collect_readiness_snapshot(
+            &result,
+            &prismtrace_host::discovery::PsProcessSampleSource,
+        )?;
+
+        println!("{}", prismtrace_host::readiness_report(&snapshot));
+        return Ok(());
+    }
+
     println!("{}", prismtrace_host::startup_summary(&result));
 
     Ok(())

@@ -52,4 +52,5 @@ The first step is to build a trustworthy local fact layer for later analysis.
 cargo test
 cargo run -p prismtrace-host
 cargo run -p prismtrace-host -- --discover
+cargo run -p prismtrace-host -- --readiness
 ```

@@ -1,0 +1,394 @@
+# PrismTrace 产品迭代路线图
+
+日期：2026-04-18
+状态：Draft
+
+## 目标
+
+把现有设计方案拆成一条可以持续推进的研发路线，明确：
+
+- 当前已经完成了什么
+- 后续应该拆成多少个迭代
+- 每个迭代交付什么能力
+- 每个迭代建议对应哪些 OpenSpec change
+
+这份文档的用途不是替代单个 change 的 proposal/design/tasks，而是作为“上层版本路线图”，帮助后续按优先级开提案和排迭代。
+
+## 当前状态
+
+已完成：
+
+- [x] Rust workspace skeleton
+- [x] 本地状态目录初始化
+- [x] 双语 README 基础说明
+- [x] OpenSpec 工作流接入
+- [x] `process-discovery` 能力实现并归档
+
+当前仓库已经具备：
+
+- `prismtrace-core`：共享领域模型
+- `prismtrace-storage`：本地状态布局
+- `prismtrace-host`：可运行 host 和本地进程发现入口
+- `openspec/specs/process-discovery/spec.md`：第一条主 spec
+
+## 迭代拆分原则
+
+这份路线图采用“独轮车 -> 自行车 -> 摩托车 -> 汽车”的切法，而不是按内部零件切分。
+
+也就是说：
+
+- 每个迭代都必须形成一个能运行、能演示、能验证价值的产品切片
+- 每个迭代都应该回答“用户现在多获得了什么能力”
+- 内部组件建设只能作为支撑，不应成为单独迭代目标
+
+因此，下面的迭代定义都以“整体验证能力”为中心，而不是按轮子、车门、座椅这种内部模块来拆。
+
+## 总体分期建议
+
+我建议把 PrismTrace 第一阶段拆成 6 个产品化迭代。
+
+### 迭代 0：车库地基
+
+状态：已完成
+
+目标：
+
+- 建立 Rust workspace
+- 建立本地状态目录
+- 建立 OpenSpec 驱动开发流程
+
+已交付：
+
+- workspace root
+- `core / storage / host` 三个 crate
+- 启动摘要
+- 双语 README
+- 初始 docs contract
+
+对应 change：
+
+- 已内化到初始提交，不单独保留 active change
+
+### 迭代 1：独轮车 - 候选目标发现器
+
+状态：已完成
+
+目标：
+
+- 用户可以在本机上跑出“哪些 AI 相关进程值得看”
+- 即使还不能 attach，也已经能从真实系统里发现候选目标
+
+已交付：
+
+- `process-discovery` 主 spec
+- `--discover` 本地入口
+- 结构化 `ProcessTarget`
+- 确定性测试
+
+对应 change：
+
+- [x] `add-process-discovery`
+
+用户可见能力：
+
+- 从真实 macOS 进程中得到结构化候选列表
+- 对 Node / Electron / Unknown 做初步分类
+- 为后续 attach 铺路
+
+### 迭代 2：自行车 - 可附着目标检查器
+
+状态：推荐下一步
+
+目标：
+
+- 用户不只是“看到一堆进程”，而是能知道“哪些目标现在值得 attach”
+- 在真正注入 probe 之前，先把 attach readiness 跑通
+
+产品形态：
+
+- 输入：候选进程列表
+- 输出：可附着 / 不可附着 / 原因 / 风险提示
+
+用户可见能力：
+
+- 看到候选目标的 readiness 状态
+- 看到失败分类和建议动作
+- 明白下一步 attach 是否值得做
+
+建议交付能力：
+
+- attach readiness 结果模型
+- 目标进程 eligibility 检查
+- 失败分类
+- host 侧 readiness 报告
+- 候选目标过滤的最小策略
+
+建议 TODO：
+
+- [ ] 定义 attach readiness 的领域模型
+- [ ] 定义 `supported / unsupported / unknown / permission-denied` 等状态
+- [ ] 在 host 中增加 readiness service
+- [ ] 为真实 macOS 进程与受控样本写测试
+- [ ] 提供本地 readiness 演示入口
+
+建议 change：
+
+- `add-attach-readiness`
+- 如果你想把过滤单独拆开，也可以随后补一个 `add-candidate-filtering`
+
+### 迭代 3：电动自行车 - 可连接但暂不采集
+
+状态：未开始
+
+目标：
+
+- 用户可以真正发起 attach，并看到连接状态
+- 即使此时还没有完整 payload capture，也已经完成“连接到目标”的闭环
+
+产品形态：
+
+- 输入：一个 readiness 通过的目标
+- 输出：attach / detach / attach state / 失败原因
+
+用户可见能力：
+
+- 选择目标并发起 attach
+- 看到 attach 是否成功
+- 看到 attach 生命周期和失败反馈
+
+建议交付能力：
+
+- attach command / host API
+- attach session 生命周期
+- probe bootstrap 协议骨架
+- attach 失败可见性
+
+建议 TODO：
+
+- [ ] 选定第一版 instrumentation backend
+- [ ] 在 host 中增加 attach controller
+- [ ] 定义 probe handshake 协议
+- [ ] 定义 attach session 状态流转
+- [ ] 增加 attach/detach 的失败分类和测试
+
+建议 change：
+
+- `add-attach-controller`
+- `add-probe-bootstrap`
+
+### 迭代 4：摩托车 - 单目标请求采集器
+
+状态：未开始
+
+目标：
+
+- 用户 attach 到一个目标后，能够真正看到它发给模型的请求
+- 这是第一个真正体现“AI observability”价值的迭代
+
+产品形态：
+
+- 输入：一个已 attach 的目标和后续发生的请求
+- 输出：request payload、response 摘要、基本元数据
+
+用户可见能力：
+
+- 看到真实 model-facing payload
+- 看到 response 和 stream 摘要
+- 能验证“它到底发了什么”
+
+建议交付能力：
+
+- `fetch` hook
+- `undici` hook
+- `http/https` fallback hook
+- request/response 结构化事件
+- 原始 payload 持久化
+
+建议 TODO：
+
+- [ ] 定义 request/response event schema 的第一版落地结构
+- [ ] 接入 probe 到 event pipeline
+- [ ] 实现 request payload 捕获
+- [ ] 实现 response / stream 捕获
+- [ ] 把事件写入本地 storage
+
+建议 change：
+
+- `add-request-capture`
+- `add-response-capture`
+
+### 迭代 5：汽车 - 本地可观测性控制台
+
+状态：未开始
+
+目标：
+
+- 把已经采集到的事实变成一个可操作、可回看、可筛选的本地产品
+- 让用户不再依赖 CLI dump，而是用控制台理解一次观测会话
+
+产品形态：
+
+- 输入：已采集的 requests / responses / targets
+- 输出：本地控制台、timeline、详情页、搜索过滤
+
+用户可见能力：
+
+- 查看 attach target 列表
+- 查看单次请求详情
+- 按 provider / model / 时间筛选
+- 搜索 prompt 片段
+
+建议交付能力：
+
+- 本地 Web UI 或最小 HTTP + 静态页面
+- attach target 列表
+- session timeline
+- request detail view
+- 搜索和过滤的最小可用版本
+
+建议 TODO：
+
+- [ ] 建立 host 的本地 API surface
+- [ ] 建立 session / request 列表视图
+- [ ] 建立 request payload / response detail view
+- [ ] 增加 provider / model / time range 过滤
+- [ ] 增加 prompt 文本搜索
+
+建议 change：
+
+- `add-local-console`
+- `add-request-inspector`
+
+### 迭代 6：越野车 - 会话重建与可见性增强
+
+状态：未开始
+
+目标：
+
+- 从“看见单次请求”推进到“看懂一次完整会话”
+- 把 tool/skill 可见性、request-response 关联和 timeline 串起来
+
+产品形态：
+
+- 输入：多条 request/response/tool visibility 事件
+- 输出：session timeline、会话重建、工具可见性视图
+
+用户可见能力：
+
+- 理解一次会话的完整时间线
+- 看见 tool / skill 暴露给模型的集合
+- 理解多次请求之间的关系
+
+建议交付能力：
+
+- tool / skill visibility snapshot
+- request-response 关联增强
+- session grouping
+- timeline replay
+
+建议 TODO：
+
+- [ ] 增加 tool visibility event
+- [ ] 增加 session correlation keys
+- [ ] 增加 timeline reconstruction
+- [ ] 增加 request / response / tool 关联展示
+
+建议 change：
+
+- `add-tool-visibility`
+- `add-session-reconstruction`
+
+### 迭代 7：自动驾驶辅助 - 分析与解释层
+
+状态：未开始
+
+目标：
+
+- 从“记录和回放事实”推进到“解释为什么会这样”
+- 这是 PrismTrace 真正拉开差异化的阶段
+
+产品形态：
+
+- 输入：已重建的 session 和事件事实层
+- 输出：diff、归因、诊断提示、未触发解释线索
+
+用户可见能力：
+
+- 看 prompt 是如何变化的
+- 看 tool / skill 为什么没出现或为什么失效
+- 看失败和 fallback 的归因提示
+
+建议交付能力：
+
+- prompt diff
+- tool visibility diff
+- failure attribution
+- skill 未触发诊断的第一版
+
+建议 TODO：
+
+- [ ] 增加 request diff 能力
+- [ ] 增加 tool visibility diff
+- [ ] 增加失败模式归因
+- [ ] 增加 skill 未触发的证据链展示
+
+建议 change：
+
+- `add-prompt-diff`
+- `add-failure-attribution`
+- `add-skill-diagnostics`
+
+## 迭代优先级建议
+
+如果按“最快形成产品闭环”的目标排序，我建议这样推进：
+
+1. 迭代 2：自行车 - 可附着目标检查器
+2. 迭代 3：电动自行车 - 可连接但暂不采集
+3. 迭代 4：摩托车 - 单目标请求采集器
+4. 迭代 5：汽车 - 本地可观测性控制台
+5. 迭代 6：越野车 - 会话重建与可见性增强
+6. 迭代 7：自动驾驶辅助 - 分析与解释层
+
+## 推荐的提案拆分粒度
+
+为了让 OpenSpec change 不至于过大，我建议遵守一个原则：
+
+- 一个 change 只解决一个清晰能力边界
+- 一个 change 最好能在 1 到 3 次实现 session 里完成
+
+建议的 change 序列：
+
+- [ ] `add-attach-readiness`
+- [ ] `add-candidate-filtering`
+- [ ] `add-attach-controller`
+- [ ] `add-probe-bootstrap`
+- [ ] `add-request-capture`
+- [ ] `add-response-capture`
+- [ ] `add-local-console`
+- [ ] `add-request-inspector`
+- [ ] `add-tool-visibility`
+- [ ] `add-session-reconstruction`
+- [ ] `add-prompt-diff`
+- [ ] `add-failure-attribution`
+- [ ] `add-skill-diagnostics`
+
+## 当前最推荐的下一步
+
+如果只开一个下一提案，我当前最推荐：
+
+- `add-attach-readiness`
+
+原因：
+
+- 它是“独轮车 -> 自行车”的自然升级
+- 它先让用户知道哪些目标值得 attach，比单纯继续堆底层组件更有产品感
+- 它能把“候选进程很多、unknown 很多”的现状收敛成真正可行动的目标列表
+
+## 什么时候需要重切路线图
+
+出现下面任一情况时，应该回头更新这份路线图：
+
+- attach/instrumentation backend 选型发生变化
+- 第一版产品 surface 不再是本地 host + Web UI
+- 目标平台不再局限于 macOS
+- 你决定先做 CLI-first 调试器，而不是 observability console

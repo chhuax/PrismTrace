@@ -52,4 +52,5 @@ PrismTrace 不只是一个 payload 抓取工具，它的长期方向是完整的
 cargo test
 cargo run -p prismtrace-host
 cargo run -p prismtrace-host -- --discover
+cargo run -p prismtrace-host -- --readiness
 ```

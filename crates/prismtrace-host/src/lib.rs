@@ -1,7 +1,9 @@
 pub mod discovery;
+pub mod readiness;
 
 use discovery::{ProcessSampleSource, discover_targets};
-use prismtrace_core::ProcessTarget;
+use prismtrace_core::{AttachReadiness, ProcessTarget};
+use readiness::evaluate_targets;
 use prismtrace_storage::StorageLayout;
 use std::io;
 use std::path::PathBuf;
@@ -38,6 +40,12 @@ pub struct BootstrapResult {
 pub struct HostSnapshot {
     pub summary: String,
     pub discovered_targets: Vec<ProcessTarget>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadinessSnapshot {
+    pub summary: String,
+    pub readiness_results: Vec<AttachReadiness>,
 }
 
 pub fn bootstrap(root: impl Into<PathBuf>) -> io::Result<BootstrapResult> {
@@ -93,10 +101,38 @@ pub fn discovery_report(snapshot: &HostSnapshot) -> String {
     report.join("\n")
 }
 
+pub fn collect_readiness_snapshot(
+    result: &BootstrapResult,
+    source: &impl ProcessSampleSource,
+) -> io::Result<ReadinessSnapshot> {
+    let discovered_targets = discover_targets(source)?;
+    let readiness_results = evaluate_targets(&discovered_targets);
+
+    Ok(ReadinessSnapshot {
+        summary: startup_summary(result),
+        readiness_results,
+    })
+}
+
+pub fn readiness_report(snapshot: &ReadinessSnapshot) -> String {
+    let mut report = vec![
+        snapshot.summary.clone(),
+        format!(
+            "Evaluated {} attach readiness results",
+            snapshot.readiness_results.len()
+        ),
+    ];
+
+    report.extend(snapshot.readiness_results.iter().map(AttachReadiness::summary));
+
+    report.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        AppConfig, DEFAULT_BIND_ADDR, bootstrap, collect_host_snapshot, startup_summary,
+        AppConfig, DEFAULT_BIND_ADDR, bootstrap, collect_host_snapshot,
+        collect_readiness_snapshot, startup_summary,
     };
     use crate::discovery::StaticProcessSampleSource;
     use prismtrace_core::ProcessSample;
@@ -110,7 +146,10 @@ mod tests {
     fn app_config_uses_a_hidden_state_directory_inside_the_workspace() {
         let config = AppConfig::from_workspace_root("/tmp/prismtrace-workspace");
 
-        assert_eq!(config.workspace_root, PathBuf::from("/tmp/prismtrace-workspace"));
+        assert_eq!(
+            config.workspace_root,
+            PathBuf::from("/tmp/prismtrace-workspace")
+        );
         assert_eq!(
             config.state_root,
             PathBuf::from("/tmp/prismtrace-workspace/.prismtrace")
@@ -126,7 +165,8 @@ mod tests {
         assert_eq!(result.config.workspace_root, workspace_root);
         assert_eq!(
             result.storage.db_path,
-            result.config
+            result
+                .config
                 .state_root
                 .join("state")
                 .join("observability.db")
@@ -145,9 +185,7 @@ mod tests {
 
         assert!(summary.contains("PrismTrace host skeleton"));
         assert!(summary.contains(DEFAULT_BIND_ADDR));
-        assert!(summary.contains(
-            result.storage.db_path.to_string_lossy().as_ref()
-        ));
+        assert!(summary.contains(result.storage.db_path.to_string_lossy().as_ref()));
 
         fs::remove_dir_all(result.config.state_root)?;
         Ok(())
@@ -182,8 +220,14 @@ mod tests {
         assert_eq!(snapshot.discovered_targets.len(), 3);
         assert!(snapshot.summary.contains("PrismTrace host skeleton"));
         assert_eq!(snapshot.discovered_targets[0].app_name, "node");
-        assert_eq!(snapshot.discovered_targets[1].runtime_kind.label(), "electron");
-        assert_eq!(snapshot.discovered_targets[2].runtime_kind.label(), "unknown");
+        assert_eq!(
+            snapshot.discovered_targets[1].runtime_kind.label(),
+            "electron"
+        );
+        assert_eq!(
+            snapshot.discovered_targets[2].runtime_kind.label(),
+            "unknown"
+        );
 
         fs::remove_dir_all(result.config.state_root)?;
         Ok(())
@@ -217,16 +261,69 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn collect_readiness_snapshot_returns_structured_results() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let source = StaticProcessSampleSource::new(vec![
+            ProcessSample {
+                pid: 301,
+                process_name: "node".into(),
+                executable_path: PathBuf::from("/usr/local/bin/node"),
+            },
+            ProcessSample {
+                pid: 302,
+                process_name: "python3".into(),
+                executable_path: PathBuf::from("/usr/bin/python3"),
+            },
+        ]);
+
+        let snapshot = collect_readiness_snapshot(&result, &source)?;
+
+        assert_eq!(snapshot.readiness_results.len(), 2);
+        assert_eq!(snapshot.readiness_results[0].status.label(), "supported");
+        assert_eq!(snapshot.readiness_results[1].status.label(), "unknown");
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn readiness_report_lists_status_and_reason() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let source = StaticProcessSampleSource::new(vec![
+            ProcessSample {
+                pid: 303,
+                process_name: "Electron".into(),
+                executable_path: PathBuf::from(
+                    "/Applications/Electron.app/Contents/MacOS/Electron",
+                ),
+            },
+            ProcessSample {
+                pid: 304,
+                process_name: "launchd".into(),
+                executable_path: PathBuf::from("/sbin/launchd"),
+            },
+        ]);
+
+        let snapshot = collect_readiness_snapshot(&result, &source)?;
+        let report = super::readiness_report(&snapshot);
+
+        assert!(report.contains("Evaluated 2 attach readiness results"));
+        assert!(report.contains("[supported] Electron"));
+        assert!(report.contains("[permission_denied] launchd"));
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
     fn unique_test_dir() -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
             .as_nanos();
 
-        std::env::temp_dir().join(format!(
-            "prismtrace-host-test-{}-{}",
-            process::id(),
-            nanos
-        ))
+        std::env::temp_dir().join(format!("prismtrace-host-test-{}-{}", process::id(), nanos))
     }
 }
