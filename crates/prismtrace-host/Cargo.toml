@@ -1,0 +1,16 @@
+[package]
+name = "prismtrace-host"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+prismtrace-core = { path = "../prismtrace-core" }
+prismtrace-storage = { path = "../prismtrace-storage" }
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "prismtrace-host"
+path = "src/main.rs"

@@ -1,0 +1,29 @@
+primary_surface: local-rust-host
+
+surfaces:
+  - id: prismtrace-host-cli
+    kind: cli
+    path: crates/prismtrace-host/src/main.rs
+    summary: >
+      Local PrismTrace host entry point. Boots workspace-local state and can print
+      either a startup summary or a process discovery report with --discover.
+    inputs:
+      - current working directory as workspace root
+      - optional --discover flag
+    outputs:
+      - startup summary
+      - process discovery report
+
+  - id: prismtrace-core-domain
+    kind: library
+    path: crates/prismtrace-core/src/lib.rs
+    summary: >
+      Shared runtime and process domain types, including process samples,
+      normalized process targets, runtime classification, and probe health.
+
+  - id: prismtrace-storage-bootstrap
+    kind: library
+    path: crates/prismtrace-storage/src/lib.rs
+    summary: >
+      Local state layout and initialization for .prismtrace/state, including the
+      observability database path and artifact directories.

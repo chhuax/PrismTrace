@@ -1,0 +1,62 @@
+# Project Overview
+
+_Last refreshed: 2026-04-18_
+
+## Project Summary
+
+PrismTrace（棱镜观测）是一个本地优先的 AI 应用可观测性工具。当前仓库的第一阶段实现重点是 Rust host 骨架和 macOS 进程发现能力，为后续 attach、payload capture、session timeline 和分析能力打底。
+
+## First-Read Paths
+
+- `README.md`
+- `README.zh-CN.md`
+- `docs/2026-04-17-ai-observability-v1-design.md`
+- `openspec/changes/add-process-discovery/`
+- `crates/prismtrace-host/src/main.rs`
+- `crates/prismtrace-host/src/discovery.rs`
+
+## System Architecture
+
+当前工程是一个 Rust workspace，按职责分成三个 crate：
+
+- `prismtrace-core`：共享领域模型，定义 runtime kind、process sample、process target 和 probe health
+- `prismtrace-storage`：本地状态目录布局与初始化，负责 `.prismtrace/state` 下的 db/artifacts/tmp/logs 结构
+- `prismtrace-host`：可运行的 host 入口，负责 bootstrap、本地 discovery service 和本地发现报告输出
+
+设计文档和需求变更通过 `docs/` 与 `openspec/` 双轨维护：
+
+- `docs/` 保存高层产品设计与历史实现计划
+- `openspec/changes/` 保存变更级 proposal/design/spec/tasks，并驱动后续实现
+
+## Main Flows
+
+### 1. Host bootstrap
+
+`crates/prismtrace-host/src/main.rs` 调用 `bootstrap()`，根据当前工作目录创建 `.prismtrace/state` 的本地状态结构，然后输出启动摘要。
+
+### 2. Process discovery
+
+当执行 `cargo run -p prismtrace-host -- --discover` 时，host 使用 `PsProcessSampleSource` 调用 `ps -axo pid=,comm=`，解析出 `ProcessSample`，再在 `prismtrace-core` 中进行 runtime 分类和目标标准化，最后生成文本 discovery report。
+
+### 3. OpenSpec-driven development
+
+功能开发默认先在 `openspec/changes/<change>/` 下完成 proposal/design/spec/tasks，再通过 apply 执行。已经完成的第一个 change 是 `add-process-discovery`。
+
+## External Surfaces And Dependencies
+
+- 当前主外部 surface 是本地 CLI：`prismtrace-host`
+- 当前依赖仅限 Rust 标准库和 workspace 内部 path dependencies
+- 当前真实 macOS 进程发现依赖系统 `ps` 命令
+
+## Problem Routing
+
+- 如果问题涉及 runtime 类型、进程目标标准化、发现结果字段：先看 `prismtrace-core/src/lib.rs`
+- 如果问题涉及本地状态目录、db/artifacts 位置：先看 `prismtrace-storage/src/lib.rs`
+- 如果问题涉及 host 启动流程、本地 discovery 行为、CLI 参数：先看 `prismtrace-host/src/lib.rs` 与 `src/main.rs`
+- 如果问题涉及某个功能为什么存在、边界是什么、下一步该怎么做：先看对应 `openspec/changes/<change>/`
+
+## Constraints And Repo Rules
+
+- 主要开发流程使用 OpenSpec；中大型功能先走 `propose/explore`，实现走 `apply`
+- OpenSpec 结构性关键词如 `Why`、`Decision`、`Requirement`、`Scenario` 保持英文，其余正文优先中文
+- 当前仓库仍在早期阶段，不要假设已经有 HTTP API、Web UI 或 attach/instrumentation runtime
