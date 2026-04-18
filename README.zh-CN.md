@@ -53,4 +53,5 @@ cargo test
 cargo run -p prismtrace-host
 cargo run -p prismtrace-host -- --discover
 cargo run -p prismtrace-host -- --readiness
+cargo run -p prismtrace-host -- --attach <pid>
 ```
