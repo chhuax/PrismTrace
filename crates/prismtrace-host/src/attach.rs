@@ -186,9 +186,10 @@ impl<R: InstrumentationRuntime> AttachBackend for LiveAttachBackend<R> {
         // even though `next_event()` blocks on `read_line()`.
         if let Some(listener) = self.ipc_listener.take() {
             let deadline = std::time::Instant::now() + DETACH_TIMEOUT;
+            let shutdown = listener.shutdown_handle();
             let (tx, rx) = std::sync::mpsc::channel();
 
-            std::thread::spawn(move || {
+            let mut worker = Some(std::thread::spawn(move || {
                 let mut listener = listener;
                 loop {
                     let event = listener.next_event();
@@ -205,20 +206,40 @@ impl<R: InstrumentationRuntime> AttachBackend for LiveAttachBackend<R> {
                         break;
                     }
                 }
-            });
+            }));
+
+            let cleanup_worker = |worker: &mut Option<std::thread::JoinHandle<()>>,
+                                  request_shutdown: bool| {
+                if request_shutdown && let Some(handle) = shutdown.as_ref() {
+                    handle.shutdown();
+                }
+                if (!request_shutdown || shutdown.is_some())
+                    && let Some(join_handle) = worker.take()
+                {
+                    let _ = join_handle.join();
+                }
+            };
 
             loop {
                 let now = std::time::Instant::now();
                 if now >= deadline {
+                    cleanup_worker(&mut worker, true);
                     return Err(AttachFailure {
                         kind: AttachFailureKind::DetachFailed,
                         reason: "timed out waiting for DetachAck".into(),
                     });
                 }
                 match rx.recv_timeout(deadline.saturating_duration_since(now)) {
-                    Ok(IpcEvent::Message(IpcMessage::DetachAck { .. })) => break,
-                    Ok(IpcEvent::ChannelDisconnected { .. }) => break,
+                    Ok(IpcEvent::Message(IpcMessage::DetachAck { .. })) => {
+                        cleanup_worker(&mut worker, false);
+                        break;
+                    }
+                    Ok(IpcEvent::ChannelDisconnected { .. }) => {
+                        cleanup_worker(&mut worker, false);
+                        break;
+                    }
                     Ok(IpcEvent::HeartbeatTimeout { .. }) => {
+                        cleanup_worker(&mut worker, true);
                         return Err(AttachFailure {
                             kind: AttachFailureKind::DetachFailed,
                             reason: "timed out waiting for DetachAck".into(),
@@ -228,12 +249,14 @@ impl<R: InstrumentationRuntime> AttachBackend for LiveAttachBackend<R> {
                         // Stray message — keep waiting.
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        cleanup_worker(&mut worker, true);
                         return Err(AttachFailure {
                             kind: AttachFailureKind::DetachFailed,
                             reason: "timed out waiting for DetachAck".into(),
                         });
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        cleanup_worker(&mut worker, false);
                         return Err(AttachFailure {
                             kind: AttachFailureKind::DetachFailed,
                             reason: "detach listener stopped before DetachAck".into(),

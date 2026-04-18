@@ -9,9 +9,9 @@ use std::sync::mpsc;
 use std::thread;
 
 fn path_only(url: &str) -> &str {
-    url.split_once("://")
-        .and_then(|(_, rest)| rest.find('/').map(|index| &rest[index..]))
-        .unwrap_or(url)
+    parse_host_and_path(url)
+        .map(|(_, path)| path)
+        .unwrap_or_else(|| url.split(['?', '#']).next().unwrap_or(url))
 }
 
 fn parse_host_and_path(url: &str) -> Option<(&str, &str)> {
@@ -193,9 +193,10 @@ pub fn consume_probe_events(
 ) -> io::Result<()> {
     let mut sequence = 1_u64;
     let timeout = listener.heartbeat_timeout();
+    let shutdown = listener.shutdown_handle();
     let (tx, rx) = mpsc::channel();
 
-    thread::spawn(move || {
+    let mut worker = Some(thread::spawn(move || {
         let mut listener = listener;
         loop {
             let event = listener.next_event();
@@ -211,7 +212,18 @@ pub fn consume_probe_events(
                 break;
             }
         }
-    });
+    }));
+
+    let cleanup_worker = |worker: &mut Option<thread::JoinHandle<()>>, request_shutdown: bool| {
+        if request_shutdown && let Some(handle) = shutdown.as_ref() {
+            handle.shutdown();
+        }
+        if (!request_shutdown || shutdown.is_some())
+            && let Some(join_handle) = worker.take()
+        {
+            let _ = join_handle.join();
+        }
+    };
 
     loop {
         match rx.recv_timeout(timeout) {
@@ -222,14 +234,22 @@ pub fn consume_probe_events(
                     sequence += 1;
                 }
             }
-            Ok(IpcEvent::Message(IpcMessage::DetachAck { .. })) => return Ok(()),
-            Ok(IpcEvent::ChannelDisconnected { .. }) => return Ok(()),
+            Ok(IpcEvent::Message(IpcMessage::DetachAck { .. })) => {
+                cleanup_worker(&mut worker, false);
+                return Ok(());
+            }
+            Ok(IpcEvent::ChannelDisconnected { .. }) => {
+                cleanup_worker(&mut worker, false);
+                return Ok(());
+            }
             Ok(IpcEvent::HeartbeatTimeout { elapsed_ms }) => {
+                cleanup_worker(&mut worker, true);
                 writeln!(output, "[probe-timeout] {} ms since heartbeat", elapsed_ms)?;
                 return Ok(());
             }
             Ok(IpcEvent::Message(_)) => {}
             Err(mpsc::RecvTimeoutError::Timeout) => {
+                cleanup_worker(&mut worker, true);
                 writeln!(
                     output,
                     "[probe-timeout] {} ms since heartbeat",
@@ -237,7 +257,10 @@ pub fn consume_probe_events(
                 )?;
                 return Ok(());
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                cleanup_worker(&mut worker, false);
+                return Ok(());
+            }
         }
     }
 }
@@ -251,7 +274,8 @@ mod tests {
     use std::io::{BufRead, Cursor, Read};
     use std::path::PathBuf;
     use std::process;
-    use std::thread;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Condvar, Mutex};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -420,6 +444,37 @@ mod tests {
     }
 
     #[test]
+    fn capture_observed_request_summary_omits_query_string() {
+        let root = temp_root("summary-query");
+        let storage = StorageLayout::new(&root);
+        storage.initialize().expect("storage should initialize");
+        let target = sample_target();
+        let msg = IpcMessage::HttpRequestObserved {
+            hook_name: "fetch".into(),
+            method: "POST".into(),
+            url: "https://api.openai.com/v1/responses?api-version=1&sig=secret".into(),
+            headers: vec![],
+            body_text: Some(r#"{"model":"gpt-4.1"}"#.into()),
+            body_truncated: false,
+            timestamp_ms: 14,
+        };
+
+        let event = capture_observed_request(&storage, &target, &msg, 1)
+            .expect("capture should succeed")
+            .expect("request should be captured");
+
+        assert!(
+            event
+                .summary
+                .contains("[captured] openai POST /v1/responses")
+        );
+        assert!(!event.summary.contains("sig=secret"));
+        assert!(!event.summary.contains("api-version=1"));
+
+        fs::remove_dir_all(root).expect("temp root cleanup should succeed");
+    }
+
+    #[test]
     fn consume_probe_events_writes_summary_for_observed_requests() {
         let root = temp_root("loop");
         let storage = StorageLayout::new(&root);
@@ -454,19 +509,28 @@ mod tests {
     }
 
     #[test]
-    fn consume_probe_events_reports_timeout_when_reader_blocks_past_heartbeat_deadline() {
+    fn consume_probe_events_requests_shutdown_when_reader_blocks_past_heartbeat_deadline() {
         let root = temp_root("timeout");
         let storage = StorageLayout::new(&root);
         storage.initialize().expect("storage should initialize");
         let target = sample_target();
         let mut output = Vec::new();
-        let reader = Box::new(SlowReader::new(Duration::from_millis(20)));
-        let listener = crate::ipc::IpcListener::new(reader, Duration::from_millis(1));
+        let state = Arc::new(BlockingState::default());
+        let reader = Box::new(BlockingReader::new(Arc::clone(&state)));
+        let listener = crate::ipc::IpcListener::new_with_shutdown(
+            reader,
+            Duration::from_millis(1),
+            Arc::new(TestShutdown::new(Arc::clone(&state))),
+        );
 
         consume_probe_events(&storage, &target, listener, &mut output).expect("loop should finish");
 
         let text = String::from_utf8(output).expect("stdout should be utf8");
         assert!(text.contains("[probe-timeout]"));
+        assert!(
+            state.interrupted.load(Ordering::SeqCst),
+            "timeout should request reader shutdown"
+        );
         fs::remove_dir_all(root).expect("temp root cleanup should succeed");
     }
 
@@ -491,29 +555,74 @@ mod tests {
         }
     }
 
-    struct SlowReader {
-        delay: Duration,
+    #[derive(Default)]
+    struct BlockingState {
+        released: Mutex<bool>,
+        wake: Condvar,
+        interrupted: AtomicBool,
     }
 
-    impl SlowReader {
-        fn new(delay: Duration) -> Self {
-            Self { delay }
+    struct BlockingReader {
+        state: Arc<BlockingState>,
+    }
+
+    impl BlockingReader {
+        fn new(state: Arc<BlockingState>) -> Self {
+            Self { state }
+        }
+
+        fn wait_until_released(&self) {
+            let mut released = self
+                .state
+                .released
+                .lock()
+                .expect("blocking state lock should succeed");
+            while !*released {
+                released = self
+                    .state
+                    .wake
+                    .wait(released)
+                    .expect("blocking state wait should succeed");
+            }
         }
     }
 
-    impl Read for SlowReader {
+    impl Read for BlockingReader {
         fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
-            thread::sleep(self.delay);
+            self.wait_until_released();
             Ok(0)
         }
     }
 
-    impl BufRead for SlowReader {
+    impl BufRead for BlockingReader {
         fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
-            thread::sleep(self.delay);
+            self.wait_until_released();
             Ok(&[])
         }
 
         fn consume(&mut self, _amt: usize) {}
+    }
+
+    struct TestShutdown {
+        state: Arc<BlockingState>,
+    }
+
+    impl TestShutdown {
+        fn new(state: Arc<BlockingState>) -> Self {
+            Self { state }
+        }
+    }
+
+    impl crate::ipc::ReaderShutdown for TestShutdown {
+        fn shutdown(&self) {
+            self.state.interrupted.store(true, Ordering::SeqCst);
+            let mut released = self
+                .state
+                .released
+                .lock()
+                .expect("blocking state lock should succeed");
+            *released = true;
+            self.state.wake.notify_all();
+        }
     }
 }
