@@ -7,6 +7,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
 fn path_only(url: &str) -> &str {
     parse_host_and_path(url)
@@ -205,6 +206,7 @@ pub fn consume_probe_events(
 ) -> io::Result<ProbeConsumeOutcome> {
     let mut sequence = 1_u64;
     let timeout = listener.heartbeat_timeout();
+    let channel_wait_timeout = timeout.saturating_add(Duration::from_millis(50));
     let shutdown = listener.shutdown_handle();
     let (tx, rx) = mpsc::channel();
 
@@ -235,15 +237,20 @@ pub fn consume_probe_events(
             if request_shutdown {
                 if let Some(handle) = shutdown.as_ref() {
                     handle.shutdown();
-                } else {
-                    return None;
                 }
+            }
+            let can_join = match worker.as_ref() {
+                None => false,
+                Some(join_handle) => !request_shutdown || shutdown.is_some() || join_handle.is_finished(),
+            };
+            if !can_join {
+                return None;
             }
             worker.take().and_then(|join_handle| join_handle.join().ok())
         };
 
     loop {
-        match rx.recv_timeout(timeout) {
+        match rx.recv_timeout(channel_wait_timeout) {
             Ok(IpcEvent::Message(message @ IpcMessage::HttpRequestObserved { .. })) => {
                 if let Some(event) = capture_observed_request(storage, target, &message, sequence)?
                 {
@@ -266,7 +273,7 @@ pub fn consume_probe_events(
                 });
             }
             Ok(IpcEvent::HeartbeatTimeout { elapsed_ms }) => {
-                let listener = cleanup_worker(&mut worker, true);
+                let listener = cleanup_worker(&mut worker, false);
                 writeln!(output, "[probe-timeout] {} ms since heartbeat", elapsed_ms)?;
                 return Ok(ProbeConsumeOutcome {
                     exit: ProbeConsumeExit::HeartbeatTimeout { elapsed_ms },
@@ -307,6 +314,7 @@ mod tests {
     use std::process;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Condvar, Mutex};
+    use std::thread;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -571,6 +579,34 @@ mod tests {
         fs::remove_dir_all(root).expect("temp root cleanup should succeed");
     }
 
+    #[test]
+    fn consume_probe_events_reclaims_listener_on_timeout_without_shutdown_handle() {
+        let root = temp_root("timeout-no-shutdown");
+        let storage = StorageLayout::new(&root);
+        storage.initialize().expect("storage should initialize");
+        let target = sample_target();
+        let mut output = Vec::new();
+        let listener = crate::ipc::IpcListener::new(
+            Box::new(AlwaysWouldBlockReader),
+            Duration::from_millis(5),
+        );
+
+        let outcome =
+            consume_probe_events(&storage, &target, listener, &mut output).expect("loop should finish");
+
+        let text = String::from_utf8(output).expect("stdout should be utf8");
+        assert!(text.contains("[probe-timeout]"));
+        assert!(
+            matches!(outcome.exit, ProbeConsumeExit::HeartbeatTimeout { .. }),
+            "expected heartbeat timeout exit"
+        );
+        assert!(
+            outcome.listener.is_some(),
+            "listener should be reclaimed even without explicit shutdown handle"
+        );
+        fs::remove_dir_all(root).expect("temp root cleanup should succeed");
+    }
+
     fn temp_root(label: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -661,5 +697,29 @@ mod tests {
             *released = true;
             self.state.wake.notify_all();
         }
+    }
+
+    struct AlwaysWouldBlockReader;
+
+    impl Read for AlwaysWouldBlockReader {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            thread::sleep(Duration::from_millis(1));
+            Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "synthetic timeout",
+            ))
+        }
+    }
+
+    impl BufRead for AlwaysWouldBlockReader {
+        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            thread::sleep(Duration::from_millis(1));
+            Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "synthetic timeout",
+            ))
+        }
+
+        fn consume(&mut self, _amt: usize) {}
     }
 }

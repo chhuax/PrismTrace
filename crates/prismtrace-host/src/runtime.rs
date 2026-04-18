@@ -132,6 +132,7 @@ const INSPECTOR_HTTP_READ_TIMEOUT: Duration = Duration::from_millis(500);
 const INSPECTOR_HTTP_WRITE_TIMEOUT: Duration = Duration::from_millis(500);
 const INSPECTOR_WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const INSPECTOR_WS_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+const INSPECTOR_BRIDGE_READ_TIMEOUT: Duration = Duration::from_millis(250);
 const TRIGGER_DETACH_EXPRESSION: &str = r#"
 (() => {
   if (typeof globalThis.__prismtraceDetach === "function") {
@@ -207,6 +208,12 @@ impl InspectorBridge {
             kind: InstrumentationErrorKind::InjectionFailed,
             message: format!("failed to create inspector bridge: {e}"),
         })?;
+        reader_side
+            .set_read_timeout(Some(INSPECTOR_BRIDGE_READ_TIMEOUT))
+            .map_err(|e| InstrumentationError {
+                kind: InstrumentationErrorKind::InjectionFailed,
+                message: format!("failed to set inspector bridge read timeout: {e}"),
+            })?;
 
         let reader = Box::new(BufReader::new(reader_side));
         let writer = InspectorBridgeWriter {
