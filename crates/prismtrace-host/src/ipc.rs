@@ -35,50 +35,66 @@ impl IpcListener {
         }
     }
 
-    /// Read the next line from the reader (blocking).
+    /// Read the next IPC message from the reader (blocking).
     /// Returns:
-    /// - IpcEvent::Message on successful parse
-    /// - IpcEvent::ChannelDisconnected on EOF or IO error (never panics)
-    /// Updates last_heartbeat when a Heartbeat message is received.
+    /// - `IpcEvent::Message` on successful parse
+    /// - `IpcEvent::ChannelDisconnected` on EOF or IO error (never panics)
+    ///
+    /// Non-IPC lines (e.g. application log output) are silently skipped so that
+    /// a single unparsable line does not terminate the session.
+    ///
+    /// Updates `last_heartbeat` when a `Heartbeat` message is received.
     pub fn next_event(&mut self) -> IpcEvent {
-        let mut line = String::new();
-        match self.reader.read_line(&mut line) {
-            Ok(0) => IpcEvent::ChannelDisconnected {
-                reason: "EOF".to_string(),
-            },
-            Ok(_) => match IpcMessage::from_json_line(&line) {
-                Ok(msg) => {
-                    if matches!(msg, IpcMessage::Heartbeat { .. }) {
-                        self.last_heartbeat = Instant::now();
-                    }
-                    IpcEvent::Message(msg)
+        loop {
+            let mut line = String::new();
+            match self.reader.read_line(&mut line) {
+                Ok(0) => {
+                    return IpcEvent::ChannelDisconnected {
+                        reason: "EOF".to_string(),
+                    };
                 }
-                Err(e) => IpcEvent::ChannelDisconnected {
-                    reason: format!("parse error: {e}"),
+                Ok(_) => match IpcMessage::from_json_line(&line) {
+                    Ok(msg) => {
+                        if matches!(msg, IpcMessage::Heartbeat { .. }) {
+                            self.last_heartbeat = Instant::now();
+                        }
+                        return IpcEvent::Message(msg);
+                    }
+                    Err(_) => {
+                        // Non-IPC line (e.g. app log) — skip and keep reading.
+                        continue;
+                    }
                 },
-            },
-            Err(e) => IpcEvent::ChannelDisconnected {
-                reason: format!("IO error: {e}"),
-            },
+                Err(e) => {
+                    return IpcEvent::ChannelDisconnected {
+                        reason: format!("IO error: {e}"),
+                    };
+                }
+            }
         }
     }
 
-    /// Non-blocking poll: reads one line and returns the parsed message.
-    /// Returns None on EOF. Updates last_heartbeat on Heartbeat messages.
+    /// Read one line from the reader and return the parsed message.
+    ///
+    /// This method **blocks** until a line is available, EOF is reached, or an IO
+    /// error occurs. Non-IPC lines are skipped. Returns `None` on EOF or IO error.
+    /// Updates `last_heartbeat` on `Heartbeat` messages.
     pub fn poll_message(&mut self) -> Option<IpcMessage> {
-        let mut line = String::new();
-        match self.reader.read_line(&mut line) {
-            Ok(0) => None,
-            Ok(_) => match IpcMessage::from_json_line(&line) {
-                Ok(msg) => {
-                    if matches!(msg, IpcMessage::Heartbeat { .. }) {
-                        self.last_heartbeat = Instant::now();
+        loop {
+            let mut line = String::new();
+            match self.reader.read_line(&mut line) {
+                Ok(0) => return None,
+                Ok(_) => match IpcMessage::from_json_line(&line) {
+                    Ok(msg) => {
+                        if matches!(msg, IpcMessage::Heartbeat { .. }) {
+                            self.last_heartbeat = Instant::now();
+                        }
+                        return Some(msg);
                     }
-                    Some(msg)
-                }
-                Err(_) => None,
-            },
-            Err(_) => None,
+                    Err(_) => continue,
+                },
+                Err(_) => return None,
+            }
         }
     }
 
@@ -128,10 +144,37 @@ mod tests {
     }
 
     #[test]
+    fn next_event_skips_non_ipc_lines_and_returns_next_valid_message() {
+        // A non-JSON app log line followed by a valid IPC message.
+        let data = format!(
+            "not json at all\n{}",
+            IpcMessage::Heartbeat { timestamp_ms: 42 }.to_json_line()
+        );
+        let mut listener = make_listener(&data, Duration::from_secs(60));
+
+        match listener.next_event() {
+            IpcEvent::Message(IpcMessage::Heartbeat { timestamp_ms }) => {
+                assert_eq!(timestamp_ms, 42);
+            }
+            _ => panic!("expected Heartbeat after skipping non-IPC line"),
+        }
+    }
+
+    #[test]
+    fn next_event_returns_disconnected_when_only_non_ipc_lines_then_eof() {
+        let mut listener = make_listener("not json\nalso not json\n", Duration::from_secs(60));
+
+        match listener.next_event() {
+            IpcEvent::ChannelDisconnected { reason } => {
+                assert_eq!(reason, "EOF");
+            }
+            _ => panic!("expected ChannelDisconnected after exhausting non-IPC lines"),
+        }
+    }
+
+    #[test]
     fn check_heartbeat_timeout_returns_some_when_timeout_exceeded() {
-        // Use 0ms timeout so it's immediately exceeded
         let listener = make_listener("", Duration::from_millis(0));
-        // Sleep briefly to ensure elapsed > 0ms
         std::thread::sleep(Duration::from_millis(1));
 
         match listener.check_heartbeat_timeout() {

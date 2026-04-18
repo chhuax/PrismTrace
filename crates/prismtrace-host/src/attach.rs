@@ -178,33 +178,62 @@ impl<R: InstrumentationRuntime> AttachBackend for LiveAttachBackend<R> {
                 reason: e.message,
             })?;
 
-        // Wait for DetachAck from the probe via the retained IPC listener.
-        if let Some(mut listener) = self.ipc_listener.take() {
+        // Wait for DetachAck via a background thread so the deadline is enforceable
+        // even though `next_event()` blocks on `read_line()`.
+        if let Some(listener) = self.ipc_listener.take() {
             let deadline = std::time::Instant::now() + DETACH_TIMEOUT;
+            let (tx, rx) = std::sync::mpsc::channel();
+
+            std::thread::spawn(move || {
+                let mut listener = listener;
+                loop {
+                    let event = listener.next_event();
+                    let terminal = matches!(
+                        event,
+                        IpcEvent::ChannelDisconnected { .. }
+                            | IpcEvent::Message(IpcMessage::DetachAck { .. })
+                            | IpcEvent::HeartbeatTimeout { .. }
+                    );
+                    if tx.send(event).is_err() {
+                        break;
+                    }
+                    if terminal {
+                        break;
+                    }
+                }
+            });
+
             loop {
-                if std::time::Instant::now() >= deadline {
+                let now = std::time::Instant::now();
+                if now >= deadline {
                     return Err(AttachFailure {
                         kind: AttachFailureKind::DetachFailed,
                         reason: "timed out waiting for DetachAck".into(),
                     });
                 }
-                match listener.next_event() {
-                    IpcEvent::Message(IpcMessage::DetachAck { .. }) => {
-                        // Clean detach confirmed.
-                        break;
-                    }
-                    IpcEvent::ChannelDisconnected { .. } => {
-                        // Probe exited without sending DetachAck — treat as detached.
-                        break;
-                    }
-                    IpcEvent::HeartbeatTimeout { .. } => {
+                match rx.recv_timeout(deadline.saturating_duration_since(now)) {
+                    Ok(IpcEvent::Message(IpcMessage::DetachAck { .. })) => break,
+                    Ok(IpcEvent::ChannelDisconnected { .. }) => break,
+                    Ok(IpcEvent::HeartbeatTimeout { .. }) => {
                         return Err(AttachFailure {
                             kind: AttachFailureKind::DetachFailed,
                             reason: "timed out waiting for DetachAck".into(),
                         });
                     }
-                    IpcEvent::Message(_) => {
-                        // Other messages (e.g. stray heartbeats) — keep waiting.
+                    Ok(IpcEvent::Message(_)) => {
+                        // Stray message — keep waiting.
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        return Err(AttachFailure {
+                            kind: AttachFailureKind::DetachFailed,
+                            reason: "timed out waiting for DetachAck".into(),
+                        });
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        return Err(AttachFailure {
+                            kind: AttachFailureKind::DetachFailed,
+                            reason: "detach listener stopped before DetachAck".into(),
+                        });
                     }
                 }
             }

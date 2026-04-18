@@ -5,7 +5,7 @@
  * Responsibilities:
  *   1. Detect available hook points (fetch, undici, http, https)
  *   2. Install no-op hook skeletons for each available hook point
- *   3. Send BootstrapReport via process.send() (Node IPC)
+ *   3. Send BootstrapReport via newline-delimited JSON on process.stdout
  *   4. Maintain a heartbeat and handle detach
  */
 (function bootstrapProbe() {
@@ -203,67 +203,80 @@
   }
 
   // ── Bootstrap sequence ───────────────────────────────────────────────────────
+  //
+  // Side-effectful startup (heartbeat, stdin listener, BootstrapReport) is gated
+  // behind PRISMTRACE_PROBE_NO_AUTORUN so unit tests can require() this file to
+  // access the exported helpers without starting timers that keep the process alive.
 
-  var detection = detectRuntimes();
-  var hookResult = installHooks(detection.available);
+  var heartbeatInterval = null;
 
-  // Send BootstrapReport.
-  sendMessage({
-    type: 'bootstrap_report',
-    installed_hooks: hookResult.installedHooks,
-    failed_hooks: hookResult.failedHooks,
-    timestamp_ms: Date.now(),
-  });
+  function dispose() {
+    if (heartbeatInterval !== null) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
+    if (typeof process !== 'undefined' && process.stdin) {
+      process.stdin.pause();
+    }
+    removeAllHooks();
+  }
 
-  // ── Heartbeat ────────────────────────────────────────────────────────────────
+  var isTestMode =
+    typeof process !== 'undefined' &&
+    process.env &&
+    process.env.PRISMTRACE_PROBE_NO_AUTORUN === '1';
 
-  var heartbeatInterval = setInterval(function () {
+  if (!isTestMode) {
+    var detection = detectRuntimes();
+    var hookResult = installHooks(detection.available);
+
+    // Send BootstrapReport.
     sendMessage({
-      type: 'heartbeat',
+      type: 'bootstrap_report',
+      installed_hooks: hookResult.installedHooks,
+      failed_hooks: hookResult.failedHooks,
       timestamp_ms: Date.now(),
     });
-  }, HEARTBEAT_INTERVAL_MS);
 
-  // ── Detach listener ──────────────────────────────────────────────────────────
-  //
-  // Detach commands arrive as newline-delimited JSON on process.stdin,
-  // matching the same transport used for outbound IPC messages.
+    // ── Heartbeat ──────────────────────────────────────────────────────────────
 
-  if (typeof process !== 'undefined' && process.stdin && typeof process.stdin.on === 'function') {
-    var stdinBuf = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', function (chunk) {
-      stdinBuf += chunk;
-      var lines = stdinBuf.split('\n');
-      stdinBuf = lines.pop(); // keep incomplete last line
-      lines.forEach(function (line) {
-        if (!line.trim()) return;
-        try {
-          var msg = JSON.parse(line);
-          if (msg && msg.type === 'detach') {
-            // Acknowledge detach.
-            sendMessage({
-              type: 'detach_ack',
-              timestamp_ms: Date.now(),
-            });
-
-            // Remove all installed hooks.
-            removeAllHooks();
-
-            // Stop heartbeat.
-            clearInterval(heartbeatInterval);
-
-            process.stdin.pause();
-          }
-        } catch (_) {
-          // Ignore malformed lines.
-        }
+    heartbeatInterval = setInterval(function () {
+      sendMessage({
+        type: 'heartbeat',
+        timestamp_ms: Date.now(),
       });
-    });
+    }, HEARTBEAT_INTERVAL_MS);
+
+    // ── Detach listener ────────────────────────────────────────────────────────
+    //
+    // Detach commands arrive as newline-delimited JSON on process.stdin,
+    // matching the same transport used for outbound IPC messages.
+
+    if (typeof process !== 'undefined' && process.stdin && typeof process.stdin.on === 'function') {
+      var stdinBuf = '';
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', function (chunk) {
+        stdinBuf += chunk;
+        var lines = stdinBuf.split('\n');
+        stdinBuf = lines.pop(); // keep incomplete last line
+        lines.forEach(function (line) {
+          if (!line.trim()) return;
+          try {
+            var msg = JSON.parse(line);
+            if (msg && msg.type === 'detach') {
+              sendMessage({ type: 'detach_ack', timestamp_ms: Date.now() });
+              dispose();
+            }
+          } catch (_) {
+            // Ignore malformed lines.
+          }
+        });
+      });
+    }
   }
 
   // Export internals for testing (only when running under Node.js module system)
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { detectRuntimes, installHooks, removeAllHooks };
+    module.exports = { detectRuntimes, installHooks, removeAllHooks, dispose };
   }
 })();
