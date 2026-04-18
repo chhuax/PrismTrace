@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn path_only(url: &str) -> &str {
     parse_host_and_path(url)
@@ -206,7 +206,11 @@ pub fn consume_probe_events(
 ) -> io::Result<ProbeConsumeOutcome> {
     let mut sequence = 1_u64;
     let timeout = listener.heartbeat_timeout();
-    let channel_wait_timeout = timeout.saturating_add(Duration::from_millis(50));
+    // Give the worker enough room to surface a heartbeat timeout event even when
+    // the underlying bridge reader wakes on a coarser timeout cadence.
+    let worker_timeout_slack = Duration::from_millis(300);
+    let wait_poll_step = Duration::from_millis(100);
+    let wait_deadline = Instant::now() + timeout.saturating_add(worker_timeout_slack);
     let shutdown = listener.shutdown_handle();
     let (tx, rx) = mpsc::channel();
 
@@ -250,7 +254,25 @@ pub fn consume_probe_events(
         };
 
     loop {
-        match rx.recv_timeout(channel_wait_timeout) {
+        let now = Instant::now();
+        if now >= wait_deadline {
+            let elapsed_ms = timeout.as_millis() as u64;
+            let listener = cleanup_worker(&mut worker, true);
+            writeln!(output, "[probe-timeout] {} ms since heartbeat", elapsed_ms)?;
+            return Ok(ProbeConsumeOutcome {
+                exit: ProbeConsumeExit::HeartbeatTimeout { elapsed_ms },
+                listener,
+            });
+        }
+
+        let remaining = wait_deadline.saturating_duration_since(now);
+        let recv_window = if remaining > wait_poll_step {
+            wait_poll_step
+        } else {
+            remaining
+        };
+
+        match rx.recv_timeout(recv_window) {
             Ok(IpcEvent::Message(message @ IpcMessage::HttpRequestObserved { .. })) => {
                 if let Some(event) = capture_observed_request(storage, target, &message, sequence)?
                 {
@@ -281,15 +303,7 @@ pub fn consume_probe_events(
                 });
             }
             Ok(IpcEvent::Message(_)) => {}
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                let elapsed_ms = timeout.as_millis() as u64;
-                let listener = cleanup_worker(&mut worker, true);
-                writeln!(output, "[probe-timeout] {} ms since heartbeat", elapsed_ms)?;
-                return Ok(ProbeConsumeOutcome {
-                    exit: ProbeConsumeExit::HeartbeatTimeout { elapsed_ms },
-                    listener,
-                });
-            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let listener = cleanup_worker(&mut worker, false);
                 return Ok(ProbeConsumeOutcome {
@@ -315,7 +329,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Condvar, Mutex};
     use std::thread;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     #[test]
     fn capture_observed_request_persists_openai_request() {
@@ -607,6 +621,39 @@ mod tests {
         fs::remove_dir_all(root).expect("temp root cleanup should succeed");
     }
 
+    #[test]
+    fn consume_probe_events_waits_for_worker_timeout_event_before_fallback_timeout() {
+        let root = temp_root("timeout-worker-late");
+        let storage = StorageLayout::new(&root);
+        storage.initialize().expect("storage should initialize");
+        let target = sample_target();
+        let mut output = Vec::new();
+        let listener = crate::ipc::IpcListener::new(
+            Box::new(SlowWouldBlockReader::new(Duration::from_millis(180))),
+            Duration::from_millis(10),
+        );
+
+        let started = Instant::now();
+        let outcome =
+            consume_probe_events(&storage, &target, listener, &mut output).expect("loop should finish");
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed >= Duration::from_millis(150),
+            "main loop should wait for worker timeout event, elapsed={elapsed:?}"
+        );
+        assert!(matches!(
+            outcome.exit,
+            ProbeConsumeExit::HeartbeatTimeout { .. }
+        ));
+        assert!(
+            outcome.listener.is_some(),
+            "listener should be reclaimed from worker timeout path"
+        );
+
+        fs::remove_dir_all(root).expect("temp root cleanup should succeed");
+    }
+
     fn temp_root(label: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -717,6 +764,38 @@ mod tests {
             Err(std::io::Error::new(
                 std::io::ErrorKind::WouldBlock,
                 "synthetic timeout",
+            ))
+        }
+
+        fn consume(&mut self, _amt: usize) {}
+    }
+
+    struct SlowWouldBlockReader {
+        delay: Duration,
+    }
+
+    impl SlowWouldBlockReader {
+        fn new(delay: Duration) -> Self {
+            Self { delay }
+        }
+    }
+
+    impl Read for SlowWouldBlockReader {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            thread::sleep(self.delay);
+            Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "synthetic delayed timeout",
+            ))
+        }
+    }
+
+    impl BufRead for SlowWouldBlockReader {
+        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            thread::sleep(self.delay);
+            Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "synthetic delayed timeout",
             ))
         }
 
