@@ -16,8 +16,8 @@
 
 仓库目前处于设计和初始化阶段。
 
-当前设计文档在 [docs/2026-04-17-ai-observability-v1-design.md](./docs/2026-04-17-ai-observability-v1-design.md)。
-当前骨架实现计划在 [docs/2026-04-18-workspace-skeleton-implementation-plan.md](./docs/2026-04-18-workspace-skeleton-implementation-plan.md)。
+当前设计文档在 [docs/总体设计与V1方案.md](./docs/总体设计与V1方案.md)。
+当前产品路线图在 [docs/产品迭代路线图.md](./docs/产品迭代路线图.md)。
 
 ## V1 范围
 
