@@ -576,9 +576,18 @@ mod tests {
         let mut backend = LiveAttachBackend::new(runtime);
 
         // First attach to populate ipc_listener.
-        let session = backend
+        let outcome = backend
             .attach(&supported_readiness(804).target)
             .expect("attach should succeed");
+
+        // Build a minimal AttachSession to pass to detach.
+        let session = prismtrace_core::AttachSession {
+            target: supported_readiness(804).target,
+            state: prismtrace_core::AttachSessionState::Attached,
+            detail: outcome.detail,
+            bootstrap: Some(outcome.bootstrap),
+            failure: None,
+        };
 
         let result = backend.detach(&session);
         assert!(result.is_ok());
