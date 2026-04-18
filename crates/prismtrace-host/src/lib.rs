@@ -12,6 +12,7 @@ use prismtrace_core::{
     AttachFailure, AttachFailureKind, AttachReadiness, AttachSession, ProbeHealth, ProcessTarget,
 };
 use prismtrace_storage::StorageLayout;
+use request_capture::ProbeConsumeExit;
 use readiness::evaluate_targets;
 use std::io;
 use std::io::Write;
@@ -220,16 +221,43 @@ pub fn run_foreground_attach_session<R: InstrumentationRuntime>(
     let mut controller = AttachController::new(LiveAttachBackend::new(runtime));
     let attached_session = controller.attach(readiness).map_err(attach_failure_as_io_error)?;
 
-    writeln!(output, "{}", attach_report(&Ok(attached_session.clone())))?;
+    writeln!(output, "{}", attached_session.summary())?;
 
     let listener = controller.take_listener().ok_or_else(|| {
-        io::Error::other(format!(
-            "ipc listener is unavailable after successful attach for pid {}",
-            attached_session.target.pid
-        ))
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "ipc listener is unavailable after successful attach for pid {}",
+                attached_session.target.pid
+            ),
+        )
     })?;
 
-    request_capture::consume_probe_events(&result.storage, &attached_session.target, listener, output)
+    let consume_outcome =
+        request_capture::consume_probe_events(&result.storage, &attached_session.target, listener, output)?;
+
+    if let Some(listener) = consume_outcome.listener {
+        controller.restore_listener(listener);
+    }
+
+    let detach_result = if matches!(&consume_outcome.exit, ProbeConsumeExit::DetachAck) {
+        Ok(())
+    } else {
+        controller
+            .detach()
+            .map(|_| ())
+            .map_err(attach_failure_as_io_error)
+    };
+
+    match (foreground_exit_as_error(&consume_outcome.exit), detach_result) {
+        (None, Ok(())) => Ok(()),
+        (Some(err), Ok(())) => Err(err),
+        (None, Err(detach_err)) => Err(detach_err),
+        (Some(exit_err), Err(detach_err)) => Err(io::Error::new(
+            exit_err.kind(),
+            format!("{exit_err}; detach cleanup failed: {detach_err}"),
+        )),
+    }
 }
 
 fn attach_failure_as_io_error(failure: AttachFailure) -> io::Error {
@@ -243,6 +271,16 @@ fn attach_failure_as_io_error(failure: AttachFailure) -> io::Error {
     };
 
     io::Error::new(kind, failure.summary())
+}
+
+fn foreground_exit_as_error(exit: &ProbeConsumeExit) -> Option<io::Error> {
+    match exit {
+        ProbeConsumeExit::HeartbeatTimeout { elapsed_ms } => Some(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("probe heartbeat timed out after {elapsed_ms} ms"),
+        )),
+        ProbeConsumeExit::DetachAck | ProbeConsumeExit::ChannelDisconnected { .. } => None,
+    }
 }
 
 /// Detach the active session using the given backend-aware controller.
@@ -322,12 +360,16 @@ mod tests {
     use crate::discovery::StaticProcessSampleSource;
     use prismtrace_core::{
         AttachFailureKind, AttachReadiness, AttachReadinessStatus, AttachSession,
-        AttachSessionState, ProbeHealth, ProbeState, ProcessSample, ProcessTarget, RuntimeKind,
+        AttachSessionState, HttpHeader, IpcMessage, ProbeHealth, ProbeState, ProcessSample,
+        ProcessTarget, RuntimeKind,
     };
     use std::fs;
     use std::io;
+    use std::io::{BufRead, Cursor};
     use std::path::PathBuf;
     use std::process;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -597,6 +639,53 @@ mod tests {
     }
 
     #[test]
+    fn run_foreground_attach_session_attempts_detach_cleanup_after_capture_loop() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let source = StaticProcessSampleSource::new(vec![ProcessSample {
+            pid: 411,
+            process_name: "node".into(),
+            executable_path: PathBuf::from("/usr/local/bin/node"),
+        }]);
+        let detach_called = Arc::new(AtomicBool::new(false));
+        let runtime = TrackingRuntime::new(
+            vec![
+                IpcMessage::BootstrapReport {
+                    installed_hooks: vec!["fetch".into()],
+                    failed_hooks: vec![],
+                    timestamp_ms: 1,
+                }
+                .to_json_line(),
+                IpcMessage::HttpRequestObserved {
+                    hook_name: "fetch".into(),
+                    method: "POST".into(),
+                    url: "https://api.openai.com/v1/responses".into(),
+                    headers: vec![HttpHeader {
+                        name: "content-type".into(),
+                        value: "application/json".into(),
+                    }],
+                    body_text: Some("{}".into()),
+                    body_truncated: false,
+                    timestamp_ms: 2,
+                }
+                .to_json_line(),
+            ],
+            Arc::clone(&detach_called),
+        );
+        let mut output = Vec::new();
+
+        super::run_foreground_attach_session(&result, &source, runtime, 411, &mut output)?;
+
+        assert!(
+            detach_called.load(Ordering::SeqCst),
+            "foreground attach should attempt detach cleanup before returning"
+        );
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
     fn attach_report_lists_startup_summary_and_attach_result() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
@@ -778,6 +867,36 @@ mod tests {
             },
             status: AttachReadinessStatus::Supported,
             reason: "electron runtime target suitable for attach".into(),
+        }
+    }
+
+    struct TrackingRuntime {
+        messages: Vec<String>,
+        detach_called: Arc<AtomicBool>,
+    }
+
+    impl TrackingRuntime {
+        fn new(messages: Vec<String>, detach_called: Arc<AtomicBool>) -> Self {
+            Self {
+                messages,
+                detach_called,
+            }
+        }
+    }
+
+    impl crate::runtime::InstrumentationRuntime for TrackingRuntime {
+        fn inject_probe(
+            &self,
+            _pid: u32,
+            _probe_script: &str,
+        ) -> Result<Box<dyn BufRead + Send>, crate::runtime::InstrumentationError> {
+            let content = self.messages.join("");
+            Ok(Box::new(Cursor::new(content.into_bytes())))
+        }
+
+        fn send_detach_signal(&self, _pid: u32) -> Result<(), crate::runtime::InstrumentationError> {
+            self.detach_called.store(true, Ordering::SeqCst);
+            Ok(())
         }
     }
 }

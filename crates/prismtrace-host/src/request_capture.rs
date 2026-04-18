@@ -71,6 +71,18 @@ pub struct CapturedRequestEvent {
     pub summary: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProbeConsumeExit {
+    DetachAck,
+    ChannelDisconnected { reason: String },
+    HeartbeatTimeout { elapsed_ms: u64 },
+}
+
+pub struct ProbeConsumeOutcome {
+    pub exit: ProbeConsumeExit,
+    pub listener: Option<IpcListener>,
+}
+
 fn detect_provider_hint(
     url: &str,
     headers: &[HttpHeader],
@@ -190,7 +202,7 @@ pub fn consume_probe_events(
     target: &ProcessTarget,
     listener: IpcListener,
     output: &mut impl Write,
-) -> io::Result<()> {
+) -> io::Result<ProbeConsumeOutcome> {
     let mut sequence = 1_u64;
     let timeout = listener.heartbeat_timeout();
     let shutdown = listener.shutdown_handle();
@@ -204,6 +216,7 @@ pub fn consume_probe_events(
                 event,
                 IpcEvent::Message(IpcMessage::DetachAck { .. })
                     | IpcEvent::ChannelDisconnected { .. }
+                    | IpcEvent::HeartbeatTimeout { .. }
             );
             if tx.send(event).is_err() {
                 break;
@@ -212,18 +225,22 @@ pub fn consume_probe_events(
                 break;
             }
         }
+        listener
     }));
 
-    let cleanup_worker = |worker: &mut Option<thread::JoinHandle<()>>, request_shutdown: bool| {
-        if request_shutdown && let Some(handle) = shutdown.as_ref() {
-            handle.shutdown();
-        }
-        if (!request_shutdown || shutdown.is_some())
-            && let Some(join_handle) = worker.take()
-        {
-            let _ = join_handle.join();
-        }
-    };
+    let cleanup_worker =
+        |worker: &mut Option<thread::JoinHandle<IpcListener>>,
+         request_shutdown: bool|
+         -> Option<IpcListener> {
+            if request_shutdown {
+                if let Some(handle) = shutdown.as_ref() {
+                    handle.shutdown();
+                } else {
+                    return None;
+                }
+            }
+            worker.take().and_then(|join_handle| join_handle.join().ok())
+        };
 
     loop {
         match rx.recv_timeout(timeout) {
@@ -235,31 +252,45 @@ pub fn consume_probe_events(
                 }
             }
             Ok(IpcEvent::Message(IpcMessage::DetachAck { .. })) => {
-                cleanup_worker(&mut worker, false);
-                return Ok(());
+                let listener = cleanup_worker(&mut worker, false);
+                return Ok(ProbeConsumeOutcome {
+                    exit: ProbeConsumeExit::DetachAck,
+                    listener,
+                });
             }
-            Ok(IpcEvent::ChannelDisconnected { .. }) => {
-                cleanup_worker(&mut worker, false);
-                return Ok(());
+            Ok(IpcEvent::ChannelDisconnected { reason }) => {
+                let listener = cleanup_worker(&mut worker, false);
+                return Ok(ProbeConsumeOutcome {
+                    exit: ProbeConsumeExit::ChannelDisconnected { reason },
+                    listener,
+                });
             }
             Ok(IpcEvent::HeartbeatTimeout { elapsed_ms }) => {
-                cleanup_worker(&mut worker, true);
+                let listener = cleanup_worker(&mut worker, true);
                 writeln!(output, "[probe-timeout] {} ms since heartbeat", elapsed_ms)?;
-                return Ok(());
+                return Ok(ProbeConsumeOutcome {
+                    exit: ProbeConsumeExit::HeartbeatTimeout { elapsed_ms },
+                    listener,
+                });
             }
             Ok(IpcEvent::Message(_)) => {}
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                cleanup_worker(&mut worker, true);
-                writeln!(
-                    output,
-                    "[probe-timeout] {} ms since heartbeat",
-                    timeout.as_millis()
-                )?;
-                return Ok(());
+                let elapsed_ms = timeout.as_millis() as u64;
+                let listener = cleanup_worker(&mut worker, true);
+                writeln!(output, "[probe-timeout] {} ms since heartbeat", elapsed_ms)?;
+                return Ok(ProbeConsumeOutcome {
+                    exit: ProbeConsumeExit::HeartbeatTimeout { elapsed_ms },
+                    listener,
+                });
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                cleanup_worker(&mut worker, false);
-                return Ok(());
+                let listener = cleanup_worker(&mut worker, false);
+                return Ok(ProbeConsumeOutcome {
+                    exit: ProbeConsumeExit::ChannelDisconnected {
+                        reason: "probe event worker channel disconnected".into(),
+                    },
+                    listener,
+                });
             }
         }
     }
@@ -267,7 +298,7 @@ pub fn consume_probe_events(
 
 #[cfg(test)]
 mod tests {
-    use super::{capture_observed_request, consume_probe_events};
+    use super::{ProbeConsumeExit, capture_observed_request, consume_probe_events};
     use prismtrace_core::{HttpHeader, IpcMessage, ProcessTarget, RuntimeKind};
     use prismtrace_storage::StorageLayout;
     use std::fs;
@@ -500,11 +531,12 @@ mod tests {
         ));
         let listener = crate::ipc::IpcListener::new(reader, Duration::from_secs(15));
 
-        consume_probe_events(&storage, &target, listener, &mut output)
-            .expect("loop should succeed");
+        let outcome =
+            consume_probe_events(&storage, &target, listener, &mut output).expect("loop should succeed");
 
         let text = String::from_utf8(output).expect("stdout should be utf8");
         assert!(text.contains("[captured] openai POST /v1/responses"));
+        assert_eq!(outcome.exit, ProbeConsumeExit::DetachAck);
         fs::remove_dir_all(root).expect("temp root cleanup should succeed");
     }
 
@@ -523,10 +555,15 @@ mod tests {
             Arc::new(TestShutdown::new(Arc::clone(&state))),
         );
 
-        consume_probe_events(&storage, &target, listener, &mut output).expect("loop should finish");
+        let outcome =
+            consume_probe_events(&storage, &target, listener, &mut output).expect("loop should finish");
 
         let text = String::from_utf8(output).expect("stdout should be utf8");
         assert!(text.contains("[probe-timeout]"));
+        assert!(matches!(
+            outcome.exit,
+            ProbeConsumeExit::HeartbeatTimeout { .. }
+        ));
         assert!(
             state.interrupted.load(Ordering::SeqCst),
             "timeout should request reader shutdown"
