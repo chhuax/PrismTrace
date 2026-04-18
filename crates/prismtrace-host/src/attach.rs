@@ -59,6 +59,14 @@ impl ScriptedAttachBackend {
             detach_result: Ok("attach session detached".into()),
         }
     }
+
+    pub fn with_detach_failure(mut self, reason: impl Into<String>) -> Self {
+        self.detach_result = Err(AttachFailure {
+            kind: AttachFailureKind::DetachFailed,
+            reason: reason.into(),
+        });
+        self
+    }
 }
 
 impl AttachBackend for ScriptedAttachBackend {
@@ -129,22 +137,24 @@ impl<B: AttachBackend> AttachController<B> {
     }
 
     pub fn detach(&mut self) -> Result<AttachSession, AttachFailure> {
-        let active_session = self.active_session.clone().ok_or(AttachFailure {
+        let active_session = self.active_session.take().ok_or(AttachFailure {
             kind: AttachFailureKind::NoActiveSession,
             reason: "there is no active attach session to detach".into(),
         })?;
 
-        let detail = self.backend.detach(&active_session)?;
-        let detached_session = AttachSession {
-            target: active_session.target,
-            state: AttachSessionState::Detached,
-            detail,
-            bootstrap: active_session.bootstrap,
-            failure: None,
-        };
-
-        self.active_session = None;
-        Ok(detached_session)
+        match self.backend.detach(&active_session) {
+            Ok(detail) => Ok(AttachSession {
+                target: active_session.target,
+                state: AttachSessionState::Detached,
+                detail,
+                bootstrap: active_session.bootstrap,
+                failure: None,
+            }),
+            Err(failure) => {
+                self.active_session = Some(active_session);
+                Err(failure)
+            }
+        }
     }
 }
 
@@ -251,6 +261,30 @@ mod tests {
             .expect_err("detach without active session should fail");
 
         assert_eq!(failure.kind, AttachFailureKind::NoActiveSession);
+    }
+
+    #[test]
+    fn detach_restores_active_session_when_backend_fails() {
+        let mut controller = AttachController::new(
+            ScriptedAttachBackend::ready().with_detach_failure("backend refused detach"),
+        );
+        controller
+            .attach(&supported_readiness(707))
+            .expect("attach should succeed");
+
+        let failure = controller
+            .detach()
+            .expect_err("detach failure should bubble up");
+
+        assert_eq!(failure.kind, AttachFailureKind::DetachFailed);
+        assert_eq!(
+            controller
+                .active_session()
+                .expect("active session should be restored")
+                .target
+                .pid,
+            707
+        );
     }
 
     #[test]

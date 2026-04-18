@@ -11,9 +11,9 @@ PrismTrace（棱镜观测）是一个本地优先的 AI 应用可观测性工具
 - `README.md`
 - `README.zh-CN.md`
 - `docs/2026-04-17-ai-observability-v1-design.md`
-- `openspec/changes/add-process-discovery/`
-- `openspec/changes/add-attach-readiness/`
-- `openspec/changes/add-attach-controller/`
+- `openspec/specs/process-discovery/spec.md`
+- `openspec/specs/attach-readiness/spec.md`
+- `openspec/specs/attach-controller/spec.md`
 - `crates/prismtrace-host/src/main.rs`
 - `crates/prismtrace-host/src/attach.rs`
 - `crates/prismtrace-host/src/discovery.rs`
@@ -52,7 +52,7 @@ PrismTrace（棱镜观测）是一个本地优先的 AI 应用可观测性工具
 
 ### 5. OpenSpec-driven development
 
-功能开发默认先在 `openspec/changes/<change>/` 下完成 proposal/design/spec/tasks，再通过 apply 执行。当前已经完成 `add-process-discovery`、`add-attach-readiness`，并正在推进 `add-attach-controller`。
+功能开发默认先在 `openspec/changes/<change>/` 下完成 proposal/design/spec/tasks，再通过 apply 执行。当前已经完成 `add-process-discovery`、`add-attach-readiness` 与 `add-attach-controller`，对应能力已合并到 `openspec/specs/`，归档记录位于 `openspec/changes/archive/`。
 
 ## External Surfaces And Dependencies
 

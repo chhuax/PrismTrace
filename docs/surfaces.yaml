@@ -6,7 +6,9 @@ surfaces:
     path: crates/prismtrace-host/src/main.rs
     summary: >
       Local PrismTrace host entry point. Boots workspace-local state and can print
-      either a startup summary or a process discovery report with --discover.
+      a startup summary, a process discovery report with --discover, an attach
+      readiness report with --readiness, or an attach session report with
+      --attach <pid>.
     inputs:
       - current working directory as workspace root
       - optional --discover flag

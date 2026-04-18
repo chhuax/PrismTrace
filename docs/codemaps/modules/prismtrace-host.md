@@ -37,6 +37,8 @@
 
 如果带 `--attach <pid>` 参数，host 会先执行 discovery 和 readiness，找到目标 pid 对应的 readiness 结果，再通过 `attach` 模块中的受控 backend 发起最小 attach 流程，并输出结构化 attach session 报告。
 
+当前这条 attach path 仍然是一次性的 CLI demo：controller 生命周期只存在于单次命令执行期间，还没有跨命令维持 active session，也没有对外暴露 detach/status surface。长期运行的 host attach session 管理会放到后续迭代里补齐。
+
 ### Testing
 
 host 测试主要覆盖三块：
