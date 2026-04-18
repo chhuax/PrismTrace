@@ -21,7 +21,6 @@ fn attach_to_running_node_cli_captures_request_and_writes_artifact() -> io::Resu
     let fake_server = FakeLlmServer::start()?;
 
     let child = Command::new(&node_bin)
-        .arg("--inspect-port=0")
         .arg(&script_path)
         .env("PRISMTRACE_TEST_ENDPOINT", fake_server.url())
         .stdin(Stdio::null())
@@ -94,6 +93,30 @@ if (!endpoint) {
   process.exit(3);
 }
 
+function postWithBuiltinHttp(endpoint, body) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(endpoint);
+    const transport = url.protocol === "https:" ? require("https") : require("http");
+    const req = transport.request(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "authorization": "Bearer prismtrace-test-token"
+        }
+      },
+      (res) => {
+        res.on("data", () => {});
+        res.on("end", resolve);
+      }
+    );
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 async function sendRequestAndDetach() {
   try {
     const body = JSON.stringify({
@@ -110,15 +133,7 @@ async function sendRequestAndDetach() {
         body
       });
     } else {
-      const undici = require("undici");
-      await undici.request(endpoint, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "authorization": "Bearer prismtrace-test-token"
-        },
-        body
-      });
+      await postWithBuiltinHttp(endpoint, body);
     }
   } catch (_) {
     // Capture should still happen even if transport fails.
