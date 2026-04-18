@@ -8,6 +8,7 @@ pub mod runtime;
 use attach::{AttachBackend, AttachController, attach_report};
 use discovery::{ProcessSampleSource, discover_targets};
 use prismtrace_core::{AttachFailure, AttachReadiness, AttachSession, ProbeHealth, ProcessTarget};
+use prismtrace_storage::StorageLayout;
 use readiness::evaluate_targets;
 use std::io;
 use std::path::PathBuf;
