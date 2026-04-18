@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeKind {
     Node,
@@ -268,12 +270,81 @@ impl ProbeHealth {
     }
 }
 
+/// Structured error returned when an IPC line cannot be parsed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IpcParseError {
+    pub kind: IpcParseErrorKind,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IpcParseErrorKind {
+    /// The input was not valid JSON.
+    InvalidJson,
+    /// The JSON was valid but did not match any known message variant.
+    UnknownVariant,
+}
+
+impl std::fmt::Display for IpcParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{:?}] {}", self.kind, self.message)
+    }
+}
+
+impl std::error::Error for IpcParseError {}
+
+/// IPC messages exchanged between the host and the injected probe.
+///
+/// Wire format: one JSON object per line, `type` field as discriminant.
+///
+/// ```json
+/// {"type":"heartbeat","timestamp_ms":1714000000000}
+/// {"type":"bootstrap_report","installed_hooks":["fetch"],"failed_hooks":[],"timestamp_ms":1714000001000}
+/// {"type":"detach_ack","timestamp_ms":1714000002000}
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum IpcMessage {
+    Heartbeat { timestamp_ms: u64 },
+    BootstrapReport {
+        installed_hooks: Vec<String>,
+        failed_hooks: Vec<String>,
+        timestamp_ms: u64,
+    },
+    DetachAck { timestamp_ms: u64 },
+}
+
+impl IpcMessage {
+    /// Serialize to a newline-terminated JSON string.
+    pub fn to_json_line(&self) -> String {
+        let mut s = serde_json::to_string(self).expect("IpcMessage serialization is infallible");
+        s.push('\n');
+        s
+    }
+
+    /// Deserialize from a single JSON line (trailing newline is ignored).
+    pub fn from_json_line(s: &str) -> Result<Self, IpcParseError> {
+        serde_json::from_str(s.trim_end_matches('\n')).map_err(|e| {
+            // Distinguish "unknown variant / missing field" from "invalid JSON"
+            let kind = if e.is_data() {
+                IpcParseErrorKind::UnknownVariant
+            } else {
+                IpcParseErrorKind::InvalidJson
+            };
+            IpcParseError {
+                kind,
+                message: e.to_string(),
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         AttachFailure, AttachFailureKind, AttachReadiness, AttachReadinessStatus, AttachSession,
-        AttachSessionState, ProbeBootstrap, ProbeBootstrapState, ProbeHealth, ProbeState,
-        ProcessSample, ProcessTarget, RuntimeKind,
+        AttachSessionState, IpcMessage, IpcParseErrorKind, ProbeBootstrap, ProbeBootstrapState,
+        ProbeHealth, ProbeState, ProcessSample, ProcessTarget, RuntimeKind,
     };
     use std::path::PathBuf;
 
@@ -472,5 +543,60 @@ mod tests {
             session.summary(),
             "[attached] Electron (pid 601): probe handshake completed"
         );
+    }
+
+    // --- IpcMessage tests (Requirements 3.4, 7.1) ---
+
+    #[test]
+    fn ipc_message_heartbeat_round_trip() {
+        let msg = IpcMessage::Heartbeat { timestamp_ms: 1714000000000 };
+        let line = msg.to_json_line();
+        let parsed = IpcMessage::from_json_line(&line).expect("should parse heartbeat");
+        assert_eq!(parsed, msg);
+    }
+
+    #[test]
+    fn ipc_message_bootstrap_report_round_trip() {
+        let msg = IpcMessage::BootstrapReport {
+            installed_hooks: vec!["fetch".into(), "undici".into()],
+            failed_hooks: vec![],
+            timestamp_ms: 1714000001000,
+        };
+        let line = msg.to_json_line();
+        let parsed = IpcMessage::from_json_line(&line).expect("should parse bootstrap_report");
+        assert_eq!(parsed, msg);
+    }
+
+    #[test]
+    fn ipc_message_detach_ack_round_trip() {
+        let msg = IpcMessage::DetachAck { timestamp_ms: 1714000002000 };
+        let line = msg.to_json_line();
+        let parsed = IpcMessage::from_json_line(&line).expect("should parse detach_ack");
+        assert_eq!(parsed, msg);
+    }
+
+    #[test]
+    fn ipc_message_malformed_input_returns_invalid_json_error() {
+        let result = IpcMessage::from_json_line("not json at all");
+        let err = result.expect_err("should fail on malformed input");
+        assert_eq!(err.kind, IpcParseErrorKind::InvalidJson);
+    }
+
+    #[test]
+    fn ipc_message_unknown_variant_returns_unknown_variant_error() {
+        let result = IpcMessage::from_json_line(r#"{"type":"unknown_type","timestamp_ms":0}"#);
+        let err = result.expect_err("should fail on unknown variant");
+        assert_eq!(err.kind, IpcParseErrorKind::UnknownVariant);
+    }
+
+    #[test]
+    fn ipc_message_trailing_newline_is_handled_correctly() {
+        let msg = IpcMessage::Heartbeat { timestamp_ms: 42 };
+        let without_newline = r#"{"type":"heartbeat","timestamp_ms":42}"#;
+        let with_newline = format!("{}\n", without_newline);
+        let parsed_plain = IpcMessage::from_json_line(without_newline).expect("plain should parse");
+        let parsed_newline = IpcMessage::from_json_line(&with_newline).expect("with newline should parse");
+        assert_eq!(parsed_plain, msg);
+        assert_eq!(parsed_newline, msg);
     }
 }

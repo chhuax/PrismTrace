@@ -16,8 +16,8 @@ The first version targets macOS and focuses on Node or Electron based AI CLI and
 
 This repository is in the design and bootstrap stage.
 
-The current design spec lives in [docs/2026-04-17-ai-observability-v1-design.md](./docs/2026-04-17-ai-observability-v1-design.md).
-The initial workspace skeleton plan lives in [docs/2026-04-18-workspace-skeleton-implementation-plan.md](./docs/2026-04-18-workspace-skeleton-implementation-plan.md).
+The current design spec lives in [docs/总体设计与V1方案.md](./docs/总体设计与V1方案.md).
+The current product roadmap lives in [docs/产品迭代路线图.md](./docs/产品迭代路线图.md).
 
 ## V1 Direction
 

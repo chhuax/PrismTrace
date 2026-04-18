@@ -1,7 +1,15 @@
+use std::time::Duration;
+
 use prismtrace_core::{
     AttachFailure, AttachFailureKind, AttachReadiness, AttachReadinessStatus, AttachSession,
-    AttachSessionState, ProbeBootstrap, ProbeBootstrapState, ProcessTarget,
+    AttachSessionState, IpcMessage, ProbeBootstrap, ProbeBootstrapState, ProcessTarget,
 };
+
+use crate::ipc::{IpcEvent, IpcListener};
+use crate::runtime::{InstrumentationRuntime};
+
+pub const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(10);
+pub const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendAttachOutcome {
@@ -76,6 +84,123 @@ impl AttachBackend for ScriptedAttachBackend {
 
     fn detach(&mut self, _session: &AttachSession) -> Result<String, AttachFailure> {
         self.detach_result.clone()
+    }
+}
+
+pub struct LiveAttachBackend<R: InstrumentationRuntime> {
+    runtime: R,
+    probe_script: &'static str,
+    /// IPC listener retained after a successful attach so detach can wait for DetachAck.
+    ipc_listener: Option<IpcListener>,
+}
+
+impl<R: InstrumentationRuntime> LiveAttachBackend<R> {
+    pub fn new(runtime: R) -> Self {
+        Self {
+            runtime,
+            probe_script: include_str!("../probe/bootstrap.js"),
+            ipc_listener: None,
+        }
+    }
+}
+
+pub const DETACH_TIMEOUT: Duration = Duration::from_secs(5);
+
+impl<R: InstrumentationRuntime> AttachBackend for LiveAttachBackend<R> {
+    fn attach(&mut self, target: &ProcessTarget) -> Result<BackendAttachOutcome, AttachFailure> {
+        use crate::runtime::InstrumentationErrorKind;
+
+        let reader = self.runtime.inject_probe(target.pid, self.probe_script).map_err(|e| {
+            let kind = match e.kind {
+                InstrumentationErrorKind::PermissionDenied
+                | InstrumentationErrorKind::ProcessNotFound => AttachFailureKind::BackendRejected,
+                InstrumentationErrorKind::RuntimeIncompatible
+                | InstrumentationErrorKind::InjectionFailed
+                | InstrumentationErrorKind::DetachFailed => AttachFailureKind::HandshakeFailed,
+            };
+            AttachFailure {
+                kind,
+                reason: e.message,
+            }
+        })?;
+
+        let mut listener = IpcListener::new(reader, BOOTSTRAP_TIMEOUT);
+
+        loop {
+            match listener.next_event() {
+                IpcEvent::Message(IpcMessage::BootstrapReport { installed_hooks, .. }) => {
+                    if installed_hooks.is_empty() {
+                        return Err(AttachFailure {
+                            kind: AttachFailureKind::HandshakeFailed,
+                            reason: "no hooks installed".into(),
+                        });
+                    }
+                    let outcome = BackendAttachOutcome::ready(
+                        format!("probe online: {} hooks installed", installed_hooks.len()),
+                    );
+                    // Retain the listener so detach can wait for DetachAck.
+                    self.ipc_listener = Some(listener);
+                    return Ok(outcome);
+                }
+                IpcEvent::ChannelDisconnected { reason } => {
+                    return Err(AttachFailure {
+                        kind: AttachFailureKind::HandshakeFailed,
+                        reason,
+                    });
+                }
+                IpcEvent::HeartbeatTimeout { .. } => {
+                    return Err(AttachFailure {
+                        kind: AttachFailureKind::HandshakeFailed,
+                        reason: "bootstrap timeout".into(),
+                    });
+                }
+                IpcEvent::Message(_) => {
+                    // other messages — keep looping
+                }
+            }
+        }
+    }
+
+    fn detach(&mut self, session: &AttachSession) -> Result<String, AttachFailure> {
+        // Send the detach signal to the probe.
+        self.runtime.send_detach_signal(session.target.pid).map_err(|e| AttachFailure {
+            kind: AttachFailureKind::DetachFailed,
+            reason: e.message,
+        })?;
+
+        // Wait for DetachAck from the probe via the retained IPC listener.
+        if let Some(mut listener) = self.ipc_listener.take() {
+            let deadline = std::time::Instant::now() + DETACH_TIMEOUT;
+            loop {
+                if std::time::Instant::now() >= deadline {
+                    return Err(AttachFailure {
+                        kind: AttachFailureKind::DetachFailed,
+                        reason: "timed out waiting for DetachAck".into(),
+                    });
+                }
+                match listener.next_event() {
+                    IpcEvent::Message(IpcMessage::DetachAck { .. }) => {
+                        // Clean detach confirmed.
+                        break;
+                    }
+                    IpcEvent::ChannelDisconnected { .. } => {
+                        // Probe exited without sending DetachAck — treat as detached.
+                        break;
+                    }
+                    IpcEvent::HeartbeatTimeout { .. } => {
+                        return Err(AttachFailure {
+                            kind: AttachFailureKind::DetachFailed,
+                            reason: "timed out waiting for DetachAck".into(),
+                        });
+                    }
+                    IpcEvent::Message(_) => {
+                        // Other messages (e.g. stray heartbeats) — keep waiting.
+                    }
+                }
+            }
+        }
+
+        Ok(format!("[detached] pid {}", session.target.pid))
     }
 }
 
@@ -167,10 +292,14 @@ pub fn attach_report(result: &Result<AttachSession, AttachFailure>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{AttachController, BackendAttachOutcome, ScriptedAttachBackend, attach_report};
+    use super::{
+        AttachBackend, AttachController, BackendAttachOutcome, LiveAttachBackend,
+        ScriptedAttachBackend, attach_report,
+    };
+    use crate::runtime::{InstrumentationErrorKind, ScriptedInstrumentationRuntime};
     use prismtrace_core::{
         AttachFailure, AttachFailureKind, AttachReadiness, AttachReadinessStatus,
-        AttachSessionState, ProbeBootstrapState, ProcessTarget, RuntimeKind,
+        AttachSessionState, IpcMessage, ProbeBootstrapState, ProcessTarget, RuntimeKind,
     };
     use std::path::PathBuf;
 
@@ -328,5 +457,133 @@ mod tests {
             status: AttachReadinessStatus::Unknown,
             reason: "runtime classification is not strong enough to recommend attach yet".into(),
         }
+    }
+
+    fn bootstrap_report_line() -> String {
+        IpcMessage::BootstrapReport {
+            installed_hooks: vec!["fetch".into(), "http".into()],
+            failed_hooks: vec![],
+            timestamp_ms: 1000,
+        }
+        .to_json_line()
+    }
+
+    // --- LiveAttachBackend tests (Tasks 4.4 & 4.5) ---
+
+    #[test]
+    fn live_backend_attach_succeeds_when_bootstrap_report_arrives() {
+        let runtime = ScriptedInstrumentationRuntime::success_with_messages(vec![
+            bootstrap_report_line(),
+        ]);
+        let mut backend = LiveAttachBackend::new(runtime);
+
+        let outcome = backend
+            .attach(&supported_readiness(800).target)
+            .expect("attach should succeed");
+
+        assert_eq!(outcome.bootstrap.state, ProbeBootstrapState::Ready);
+    }
+
+    #[test]
+    fn live_backend_attach_fails_when_inject_returns_permission_denied() {
+        let runtime = ScriptedInstrumentationRuntime::inject_fails(
+            InstrumentationErrorKind::PermissionDenied,
+            "permission denied",
+        );
+        let mut backend = LiveAttachBackend::new(runtime);
+
+        let failure = backend
+            .attach(&supported_readiness(801).target)
+            .expect_err("permission denied should propagate as BackendRejected");
+
+        assert_eq!(failure.kind, AttachFailureKind::BackendRejected);
+    }
+
+    #[test]
+    fn live_backend_attach_fails_when_inject_returns_injection_failed() {
+        let runtime = ScriptedInstrumentationRuntime::inject_fails(
+            InstrumentationErrorKind::InjectionFailed,
+            "injection failed",
+        );
+        let mut backend = LiveAttachBackend::new(runtime);
+
+        let failure = backend
+            .attach(&supported_readiness(802).target)
+            .expect_err("injection failed should propagate as HandshakeFailed");
+
+        assert_eq!(failure.kind, AttachFailureKind::HandshakeFailed);
+    }
+
+    #[test]
+    fn live_backend_attach_fails_when_channel_disconnects_before_bootstrap() {
+        // Empty reader → EOF immediately → ChannelDisconnected → HandshakeFailed
+        let runtime = ScriptedInstrumentationRuntime::success_with_messages(vec![]);
+        let mut backend = LiveAttachBackend::new(runtime);
+
+        let failure = backend
+            .attach(&supported_readiness(803).target)
+            .expect_err("empty reader should cause handshake failure");
+
+        assert_eq!(failure.kind, AttachFailureKind::HandshakeFailed);
+    }
+
+    #[test]
+    fn live_backend_detach_succeeds() {
+        // The listener needs a DetachAck after the BootstrapReport so detach can complete.
+        let detach_ack_line = IpcMessage::DetachAck { timestamp_ms: 2000 }.to_json_line();
+        let runtime = ScriptedInstrumentationRuntime::success_with_messages(vec![
+            bootstrap_report_line(),
+            detach_ack_line,
+        ]);
+        let mut backend = LiveAttachBackend::new(runtime);
+
+        // First attach to populate ipc_listener.
+        let session = backend
+            .attach(&supported_readiness(804).target)
+            .expect("attach should succeed");
+
+        let result = backend.detach(&session);
+        assert!(result.is_ok());
+        let msg = result.unwrap();
+        assert!(msg.contains("detached"), "detach message should contain 'detached': {msg}");
+        assert!(msg.contains("804"), "detach message should contain pid: {msg}");
+    }
+
+    #[test]
+    fn live_backend_detach_fails_when_runtime_detach_fails() {
+        let runtime = ScriptedInstrumentationRuntime::detach_fails(
+            InstrumentationErrorKind::DetachFailed,
+            "could not send detach signal",
+        );
+        let mut backend = LiveAttachBackend::new(runtime);
+
+        let session = AttachController::new(ScriptedAttachBackend::ready())
+            .attach(&supported_readiness(805))
+            .expect("attach should succeed");
+
+        let failure = backend.detach(&session).expect_err("detach should fail");
+        assert_eq!(failure.kind, AttachFailureKind::DetachFailed);
+    }
+
+    #[test]
+    fn attach_controller_with_live_backend_state_machine_consistency() {
+        let detach_ack_line = IpcMessage::DetachAck { timestamp_ms: 9000 }.to_json_line();
+        let runtime = ScriptedInstrumentationRuntime::success_with_messages(vec![
+            bootstrap_report_line(),
+            detach_ack_line,
+        ]);
+        let mut controller = AttachController::new(LiveAttachBackend::new(runtime));
+
+        let session = controller
+            .attach(&supported_readiness(806))
+            .expect("attach should succeed");
+
+        assert_eq!(session.state, AttachSessionState::Attached);
+        assert!(controller.active_session().is_some());
+
+        let detached = controller.detach().expect("detach should succeed");
+
+        assert_eq!(detached.state, AttachSessionState::Detached);
+        assert!(controller.active_session().is_none());
     }
 }
