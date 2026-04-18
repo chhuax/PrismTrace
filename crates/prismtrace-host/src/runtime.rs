@@ -147,9 +147,7 @@ mod tests {
             r#"{"type":"detach_ack","timestamp_ms":2}"#.into(),
         ]);
 
-        let mut reader = runtime
-            .inject_probe(42, "")
-            .expect("inject should succeed");
+        let mut reader = runtime.inject_probe(42, "").expect("inject should succeed");
 
         let mut lines = Vec::new();
         let mut buf = String::new();
@@ -197,8 +195,7 @@ mod tests {
 
     #[test]
     fn scripted_runtime_detach_succeeds_by_default_in_success_variant() {
-        let runtime =
-            ScriptedInstrumentationRuntime::success_with_messages(vec!["line".into()]);
+        let runtime = ScriptedInstrumentationRuntime::success_with_messages(vec!["line".into()]);
 
         runtime
             .send_detach_signal(1)
@@ -221,9 +218,7 @@ mod tests {
     fn scripted_runtime_success_with_empty_messages_returns_empty_reader() {
         let runtime = ScriptedInstrumentationRuntime::success_with_messages(vec![]);
 
-        let mut reader = runtime
-            .inject_probe(1, "")
-            .expect("inject should succeed");
+        let mut reader = runtime.inject_probe(1, "").expect("inject should succeed");
 
         let mut buf = String::new();
         let n = reader.read_line(&mut buf).unwrap();
@@ -267,9 +262,7 @@ impl InstrumentationRuntime for NodeInstrumentationRuntime {
     fn send_detach_signal(&self, pid: u32) -> Result<(), InstrumentationError> {
         Err(InstrumentationError {
             kind: InstrumentationErrorKind::DetachFailed,
-            message: format!(
-                "real instrumentation backend not yet implemented (pid {pid})"
-            ),
+            message: format!("real instrumentation backend not yet implemented (pid {pid})"),
         })
     }
 }

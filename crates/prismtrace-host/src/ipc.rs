@@ -108,7 +108,10 @@ mod tests {
             IpcEvent::Message(IpcMessage::Heartbeat { timestamp_ms }) => {
                 assert_eq!(timestamp_ms, 1000);
             }
-            other => panic!("expected Message(Heartbeat), got something else: {:?}", std::mem::discriminant(&other)),
+            other => panic!(
+                "expected Message(Heartbeat), got something else: {:?}",
+                std::mem::discriminant(&other)
+            ),
         }
     }
 

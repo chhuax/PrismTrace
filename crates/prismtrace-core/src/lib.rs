@@ -305,13 +305,17 @@ impl std::error::Error for IpcParseError {}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IpcMessage {
-    Heartbeat { timestamp_ms: u64 },
+    Heartbeat {
+        timestamp_ms: u64,
+    },
     BootstrapReport {
         installed_hooks: Vec<String>,
         failed_hooks: Vec<String>,
         timestamp_ms: u64,
     },
-    DetachAck { timestamp_ms: u64 },
+    DetachAck {
+        timestamp_ms: u64,
+    },
 }
 
 impl IpcMessage {
@@ -549,7 +553,9 @@ mod tests {
 
     #[test]
     fn ipc_message_heartbeat_round_trip() {
-        let msg = IpcMessage::Heartbeat { timestamp_ms: 1714000000000 };
+        let msg = IpcMessage::Heartbeat {
+            timestamp_ms: 1714000000000,
+        };
         let line = msg.to_json_line();
         let parsed = IpcMessage::from_json_line(&line).expect("should parse heartbeat");
         assert_eq!(parsed, msg);
@@ -569,7 +575,9 @@ mod tests {
 
     #[test]
     fn ipc_message_detach_ack_round_trip() {
-        let msg = IpcMessage::DetachAck { timestamp_ms: 1714000002000 };
+        let msg = IpcMessage::DetachAck {
+            timestamp_ms: 1714000002000,
+        };
         let line = msg.to_json_line();
         let parsed = IpcMessage::from_json_line(&line).expect("should parse detach_ack");
         assert_eq!(parsed, msg);
@@ -595,7 +603,8 @@ mod tests {
         let without_newline = r#"{"type":"heartbeat","timestamp_ms":42}"#;
         let with_newline = format!("{}\n", without_newline);
         let parsed_plain = IpcMessage::from_json_line(without_newline).expect("plain should parse");
-        let parsed_newline = IpcMessage::from_json_line(&with_newline).expect("with newline should parse");
+        let parsed_newline =
+            IpcMessage::from_json_line(&with_newline).expect("with newline should parse");
         assert_eq!(parsed_plain, msg);
         assert_eq!(parsed_newline, msg);
     }

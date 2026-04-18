@@ -7,7 +7,7 @@ pub mod runtime;
 
 use attach::{AttachBackend, AttachController, attach_report};
 use discovery::{ProcessSampleSource, discover_targets};
-use prismtrace_core::{AttachFailure, AttachReadiness, AttachSession, ProcessTarget, ProbeHealth};
+use prismtrace_core::{AttachFailure, AttachReadiness, AttachSession, ProbeHealth, ProcessTarget};
 use readiness::evaluate_targets;
 use std::io;
 use std::path::PathBuf;
@@ -262,14 +262,14 @@ pub fn attach_status_report(snapshot: &AttachStatusSnapshot) -> String {
 mod tests {
     use super::{
         AppConfig, AttachStatusSnapshot, DEFAULT_BIND_ADDR, DetachSnapshot, attach_status_report,
-        bootstrap, collect_attach_status_snapshot, collect_detach_snapshot,
-        collect_host_snapshot, collect_readiness_snapshot, detach_report, startup_summary,
+        bootstrap, collect_attach_status_snapshot, collect_detach_snapshot, collect_host_snapshot,
+        collect_readiness_snapshot, detach_report, startup_summary,
     };
     use crate::attach::{AttachController, ScriptedAttachBackend};
     use crate::discovery::StaticProcessSampleSource;
     use prismtrace_core::{
         AttachFailureKind, AttachReadiness, AttachReadinessStatus, AttachSession,
-        AttachSessionState, ProcessSample, ProcessTarget, ProbeHealth, ProbeState, RuntimeKind,
+        AttachSessionState, ProbeHealth, ProbeState, ProcessSample, ProcessTarget, RuntimeKind,
     };
     use std::fs;
     use std::io;

@@ -6,7 +6,7 @@ use prismtrace_core::{
 };
 
 use crate::ipc::{IpcEvent, IpcListener};
-use crate::runtime::{InstrumentationRuntime};
+use crate::runtime::InstrumentationRuntime;
 
 pub const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(10);
 pub const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -110,34 +110,42 @@ impl<R: InstrumentationRuntime> AttachBackend for LiveAttachBackend<R> {
     fn attach(&mut self, target: &ProcessTarget) -> Result<BackendAttachOutcome, AttachFailure> {
         use crate::runtime::InstrumentationErrorKind;
 
-        let reader = self.runtime.inject_probe(target.pid, self.probe_script).map_err(|e| {
-            let kind = match e.kind {
-                InstrumentationErrorKind::PermissionDenied
-                | InstrumentationErrorKind::ProcessNotFound => AttachFailureKind::BackendRejected,
-                InstrumentationErrorKind::RuntimeIncompatible
-                | InstrumentationErrorKind::InjectionFailed
-                | InstrumentationErrorKind::DetachFailed => AttachFailureKind::HandshakeFailed,
-            };
-            AttachFailure {
-                kind,
-                reason: e.message,
-            }
-        })?;
+        let reader = self
+            .runtime
+            .inject_probe(target.pid, self.probe_script)
+            .map_err(|e| {
+                let kind = match e.kind {
+                    InstrumentationErrorKind::PermissionDenied
+                    | InstrumentationErrorKind::ProcessNotFound => {
+                        AttachFailureKind::BackendRejected
+                    }
+                    InstrumentationErrorKind::RuntimeIncompatible
+                    | InstrumentationErrorKind::InjectionFailed
+                    | InstrumentationErrorKind::DetachFailed => AttachFailureKind::HandshakeFailed,
+                };
+                AttachFailure {
+                    kind,
+                    reason: e.message,
+                }
+            })?;
 
         let mut listener = IpcListener::new(reader, BOOTSTRAP_TIMEOUT);
 
         loop {
             match listener.next_event() {
-                IpcEvent::Message(IpcMessage::BootstrapReport { installed_hooks, .. }) => {
+                IpcEvent::Message(IpcMessage::BootstrapReport {
+                    installed_hooks, ..
+                }) => {
                     if installed_hooks.is_empty() {
                         return Err(AttachFailure {
                             kind: AttachFailureKind::HandshakeFailed,
                             reason: "no hooks installed".into(),
                         });
                     }
-                    let outcome = BackendAttachOutcome::ready(
-                        format!("probe online: {} hooks installed", installed_hooks.len()),
-                    );
+                    let outcome = BackendAttachOutcome::ready(format!(
+                        "probe online: {} hooks installed",
+                        installed_hooks.len()
+                    ));
                     // Retain the listener so detach can wait for DetachAck.
                     self.ipc_listener = Some(listener);
                     return Ok(outcome);
@@ -163,10 +171,12 @@ impl<R: InstrumentationRuntime> AttachBackend for LiveAttachBackend<R> {
 
     fn detach(&mut self, session: &AttachSession) -> Result<String, AttachFailure> {
         // Send the detach signal to the probe.
-        self.runtime.send_detach_signal(session.target.pid).map_err(|e| AttachFailure {
-            kind: AttachFailureKind::DetachFailed,
-            reason: e.message,
-        })?;
+        self.runtime
+            .send_detach_signal(session.target.pid)
+            .map_err(|e| AttachFailure {
+                kind: AttachFailureKind::DetachFailed,
+                reason: e.message,
+            })?;
 
         // Wait for DetachAck from the probe via the retained IPC listener.
         if let Some(mut listener) = self.ipc_listener.take() {
@@ -472,9 +482,8 @@ mod tests {
 
     #[test]
     fn live_backend_attach_succeeds_when_bootstrap_report_arrives() {
-        let runtime = ScriptedInstrumentationRuntime::success_with_messages(vec![
-            bootstrap_report_line(),
-        ]);
+        let runtime =
+            ScriptedInstrumentationRuntime::success_with_messages(vec![bootstrap_report_line()]);
         let mut backend = LiveAttachBackend::new(runtime);
 
         let outcome = backend
@@ -545,8 +554,14 @@ mod tests {
         let result = backend.detach(&session);
         assert!(result.is_ok());
         let msg = result.unwrap();
-        assert!(msg.contains("detached"), "detach message should contain 'detached': {msg}");
-        assert!(msg.contains("804"), "detach message should contain pid: {msg}");
+        assert!(
+            msg.contains("detached"),
+            "detach message should contain 'detached': {msg}"
+        );
+        assert!(
+            msg.contains("804"),
+            "detach message should contain pid: {msg}"
+        );
     }
 
     #[test]
