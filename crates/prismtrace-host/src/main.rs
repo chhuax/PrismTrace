@@ -6,6 +6,10 @@ fn main() -> std::io::Result<()> {
         let snapshot = prismtrace_host::collect_attach_snapshot(
             &result,
             &prismtrace_host::discovery::PsProcessSampleSource,
+            // NOTE: NodeInstrumentationRuntime is a placeholder that always returns
+            // InjectionFailed — real dynamic instrumentation is not yet implemented.
+            // ScriptedAttachBackend is used here so --attach produces a meaningful
+            // result until a real backend lands in a future iteration.
             prismtrace_host::attach::ScriptedAttachBackend::ready(),
             pid,
         )?;
@@ -31,6 +35,21 @@ fn main() -> std::io::Result<()> {
         )?;
 
         println!("{}", prismtrace_host::readiness_report(&snapshot));
+        return Ok(());
+    }
+
+    if args.iter().any(|arg| arg == "--detach") {
+        let mut controller = prismtrace_host::attach::AttachController::new(
+            prismtrace_host::attach::ScriptedAttachBackend::ready(),
+        );
+        let snapshot = prismtrace_host::collect_detach_snapshot(&result, &mut controller)?;
+        println!("{}", prismtrace_host::detach_report(&snapshot));
+        return Ok(());
+    }
+
+    if args.iter().any(|arg| arg == "--attach-status") {
+        let snapshot = prismtrace_host::collect_attach_status_snapshot(&result, None, None)?;
+        println!("{}", prismtrace_host::attach_status_report(&snapshot));
         return Ok(());
     }
 

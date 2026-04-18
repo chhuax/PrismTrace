@@ -10,10 +10,10 @@ PrismTrace（棱镜观测）是一个本地优先的 AI 应用可观测性工具
 
 - `README.md`
 - `README.zh-CN.md`
-- `docs/2026-04-17-ai-observability-v1-design.md`
-- `openspec/specs/process-discovery/spec.md`
-- `openspec/specs/attach-readiness/spec.md`
-- `openspec/specs/attach-controller/spec.md`
+- `docs/总体设计与V1方案.md`
+- `openspec/changes/add-process-discovery/`
+- `openspec/changes/add-attach-readiness/`
+- `openspec/changes/add-attach-controller/`
 - `crates/prismtrace-host/src/main.rs`
 - `crates/prismtrace-host/src/attach.rs`
 - `crates/prismtrace-host/src/discovery.rs`

@@ -1,10 +1,13 @@
 pub mod attach;
 pub mod discovery;
+pub mod ipc;
+pub mod probe_health;
 pub mod readiness;
+pub mod runtime;
 
 use attach::{AttachBackend, AttachController, attach_report};
 use discovery::{ProcessSampleSource, discover_targets};
-use prismtrace_core::{AttachFailure, AttachReadiness, AttachSession, ProcessTarget};
+use prismtrace_core::{AttachFailure, AttachReadiness, AttachSession, ProbeHealth, ProcessTarget};
 use prismtrace_storage::StorageLayout;
 use readiness::evaluate_targets;
 use std::io;
@@ -54,6 +57,19 @@ pub struct ReadinessSnapshot {
 pub struct AttachSnapshot {
     pub summary: String,
     pub attach_result: Result<AttachSession, AttachFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetachSnapshot {
+    pub summary: String,
+    pub detach_result: Result<AttachSession, AttachFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachStatusSnapshot {
+    pub summary: String,
+    pub active_session: Option<AttachSession>,
+    pub probe_health: Option<ProbeHealth>,
 }
 
 pub fn bootstrap(root: impl Into<PathBuf>) -> io::Result<BootstrapResult> {
@@ -177,14 +193,85 @@ pub fn attach_snapshot_report(snapshot: &AttachSnapshot) -> String {
     .join("\n")
 }
 
+/// Detach the active session using the given backend-aware controller.
+pub fn collect_detach_snapshot<B: AttachBackend>(
+    result: &BootstrapResult,
+    controller: &mut AttachController<B>,
+) -> io::Result<DetachSnapshot> {
+    let detach_result = controller.detach();
+    Ok(DetachSnapshot {
+        summary: startup_summary(result),
+        detach_result,
+    })
+}
+
+/// Read-only query of current attach status. Does NOT modify session state.
+pub fn collect_attach_status_snapshot(
+    result: &BootstrapResult,
+    active_session: Option<AttachSession>,
+    probe_health: Option<ProbeHealth>,
+) -> io::Result<AttachStatusSnapshot> {
+    Ok(AttachStatusSnapshot {
+        summary: startup_summary(result),
+        active_session,
+        probe_health,
+    })
+}
+
+pub fn detach_report(snapshot: &DetachSnapshot) -> String {
+    let result_line = match &snapshot.detach_result {
+        Ok(session) => format!(
+            "[detached] {} (pid {})",
+            session.target.display_name(),
+            session.target.pid
+        ),
+        Err(failure) => failure.summary(),
+    };
+    [snapshot.summary.clone(), result_line].join("\n")
+}
+
+pub fn attach_status_report(snapshot: &AttachStatusSnapshot) -> String {
+    let status_line = match &snapshot.active_session {
+        None => "no active attach session".to_string(),
+        Some(session) => {
+            let health_summary = match &snapshot.probe_health {
+                Some(health) => format!(
+                    "probe: installed={}, failed={}{}",
+                    health.installed_hooks.len(),
+                    health.failed_hooks.len(),
+                    if health.failed_hooks.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", health.failed_hooks.join(", "))
+                    }
+                ),
+                None => "probe: no health data".to_string(),
+            };
+            format!(
+                "[{}] {} (pid {})\n{}",
+                session.state.label(),
+                session.target.display_name(),
+                session.target.pid,
+                health_summary
+            )
+        }
+    };
+    [snapshot.summary.clone(), status_line].join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        AppConfig, DEFAULT_BIND_ADDR, bootstrap, collect_host_snapshot, collect_readiness_snapshot,
-        startup_summary,
+        AppConfig, AttachStatusSnapshot, DEFAULT_BIND_ADDR, DetachSnapshot, attach_status_report,
+        bootstrap, collect_attach_status_snapshot, collect_detach_snapshot, collect_host_snapshot,
+        collect_readiness_snapshot, detach_report, startup_summary,
     };
+    use crate::attach::{AttachController, ScriptedAttachBackend};
     use crate::discovery::StaticProcessSampleSource;
-    use prismtrace_core::ProcessSample;
+    use prismtrace_core::{
+        AttachFailureKind, AttachReadiness, AttachReadinessStatus, AttachSession,
+        AttachSessionState, ProbeHealth, ProbeState, ProcessSample, ProcessTarget, RuntimeKind,
+    };
     use std::fs;
     use std::io;
     use std::path::PathBuf;
@@ -461,5 +548,156 @@ mod tests {
             .as_nanos();
 
         std::env::temp_dir().join(format!("prismtrace-host-test-{}-{}", process::id(), nanos))
+    }
+
+    // --- Task 6.4 tests ---
+
+    #[test]
+    fn collect_detach_snapshot_returns_no_active_session_when_no_session_exists() -> io::Result<()>
+    {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let mut controller = AttachController::new(ScriptedAttachBackend::ready());
+
+        let snapshot = collect_detach_snapshot(&result, &mut controller)?;
+
+        let failure = snapshot
+            .detach_result
+            .expect_err("detach without session should fail");
+        assert_eq!(failure.kind, AttachFailureKind::NoActiveSession);
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn collect_detach_snapshot_returns_detached_session_when_session_exists() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let mut controller = AttachController::new(ScriptedAttachBackend::ready());
+        controller
+            .attach(&supported_readiness(501))
+            .expect("attach should succeed");
+
+        let snapshot = collect_detach_snapshot(&result, &mut controller)?;
+
+        let session = snapshot
+            .detach_result
+            .expect("detach with active session should succeed");
+        assert_eq!(session.state, AttachSessionState::Detached);
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn collect_attach_status_snapshot_returns_no_session_when_none() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+
+        let snapshot = collect_attach_status_snapshot(&result, None, None)?;
+
+        assert!(snapshot.active_session.is_none());
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn attach_status_report_contains_no_active_session_message() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+
+        let snapshot = collect_attach_status_snapshot(&result, None, None)?;
+        let report = attach_status_report(&snapshot);
+
+        assert!(report.contains("no active attach session"));
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn attach_status_report_contains_probe_health_summary() {
+        let session = AttachSession {
+            target: ProcessTarget {
+                pid: 503,
+                app_name: "TestApp".into(),
+                executable_path: PathBuf::from("/usr/bin/testapp"),
+                runtime_kind: RuntimeKind::Node,
+            },
+            state: AttachSessionState::Attached,
+            detail: "probe handshake completed".into(),
+            bootstrap: None,
+            failure: None,
+        };
+        let health = ProbeHealth {
+            state: ProbeState::Attached,
+            installed_hooks: vec!["fetch".into(), "http".into()],
+            failed_hooks: vec!["undici".into()],
+        };
+        let snapshot = AttachStatusSnapshot {
+            summary: "test summary".into(),
+            active_session: Some(session),
+            probe_health: Some(health),
+        };
+
+        let report = attach_status_report(&snapshot);
+
+        assert!(report.contains("installed=2"), "report: {report}");
+        assert!(report.contains("failed=1"), "report: {report}");
+        assert!(report.contains("undici"), "report: {report}");
+    }
+
+    #[test]
+    fn detach_report_contains_detached_and_pid() {
+        let session = AttachSession {
+            target: ProcessTarget {
+                pid: 502,
+                app_name: "TestApp".into(),
+                executable_path: PathBuf::from("/usr/bin/testapp"),
+                runtime_kind: RuntimeKind::Node,
+            },
+            state: AttachSessionState::Detached,
+            detail: "attach session detached".into(),
+            bootstrap: None,
+            failure: None,
+        };
+        let snapshot = DetachSnapshot {
+            summary: "test summary".into(),
+            detach_result: Ok(session),
+        };
+
+        let report = detach_report(&snapshot);
+
+        assert!(report.contains("[detached]"), "report: {report}");
+        assert!(report.contains("502"), "report: {report}");
+    }
+
+    #[test]
+    fn attach_status_report_does_not_modify_session_state() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+
+        let snapshot1 = collect_attach_status_snapshot(&result, None, None)?;
+        let snapshot2 = collect_attach_status_snapshot(&result, None, None)?;
+
+        assert_eq!(snapshot1, snapshot2);
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    fn supported_readiness(pid: u32) -> AttachReadiness {
+        AttachReadiness {
+            target: ProcessTarget {
+                pid,
+                app_name: format!("TestApp-{pid}"),
+                executable_path: PathBuf::from("/Applications/TestApp.app/Contents/MacOS/TestApp"),
+                runtime_kind: RuntimeKind::Electron,
+            },
+            status: AttachReadinessStatus::Supported,
+            reason: "electron runtime target suitable for attach".into(),
+        }
     }
 }
