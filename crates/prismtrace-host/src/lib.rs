@@ -6,13 +6,17 @@ pub mod readiness;
 pub mod request_capture;
 pub mod runtime;
 
-use attach::{AttachBackend, AttachController, attach_report};
+use attach::{AttachBackend, AttachController, LiveAttachBackend, attach_report};
 use discovery::{ProcessSampleSource, discover_targets};
-use prismtrace_core::{AttachFailure, AttachReadiness, AttachSession, ProbeHealth, ProcessTarget};
+use prismtrace_core::{
+    AttachFailure, AttachFailureKind, AttachReadiness, AttachSession, ProbeHealth, ProcessTarget,
+};
 use prismtrace_storage::StorageLayout;
 use readiness::evaluate_targets;
 use std::io;
+use std::io::Write;
 use std::path::PathBuf;
+use runtime::InstrumentationRuntime;
 
 pub const DEFAULT_BIND_ADDR: &str = "127.0.0.1:7799";
 
@@ -192,6 +196,53 @@ pub fn attach_snapshot_report(snapshot: &AttachSnapshot) -> String {
         attach_report(&snapshot.attach_result),
     ]
     .join("\n")
+}
+
+pub fn run_foreground_attach_session<R: InstrumentationRuntime>(
+    result: &BootstrapResult,
+    source: &impl ProcessSampleSource,
+    runtime: R,
+    pid: u32,
+    output: &mut impl Write,
+) -> io::Result<()> {
+    let discovered_targets = discover_targets(source)?;
+    let readiness_results = evaluate_targets(&discovered_targets);
+    let readiness = readiness_results
+        .iter()
+        .find(|entry| entry.target.pid == pid)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("no discovered target with pid {pid} is available for attach"),
+            )
+        })?;
+
+    let mut controller = AttachController::new(LiveAttachBackend::new(runtime));
+    let attached_session = controller.attach(readiness).map_err(attach_failure_as_io_error)?;
+
+    writeln!(output, "{}", attach_report(&Ok(attached_session.clone())))?;
+
+    let listener = controller.take_listener().ok_or_else(|| {
+        io::Error::other(format!(
+            "ipc listener is unavailable after successful attach for pid {}",
+            attached_session.target.pid
+        ))
+    })?;
+
+    request_capture::consume_probe_events(&result.storage, &attached_session.target, listener, output)
+}
+
+fn attach_failure_as_io_error(failure: AttachFailure) -> io::Error {
+    let kind = match failure.kind {
+        AttachFailureKind::NotReady => io::ErrorKind::InvalidInput,
+        AttachFailureKind::BackendRejected => io::ErrorKind::PermissionDenied,
+        AttachFailureKind::HandshakeFailed => io::ErrorKind::ConnectionAborted,
+        AttachFailureKind::ActiveSessionExists => io::ErrorKind::AlreadyExists,
+        AttachFailureKind::NoActiveSession => io::ErrorKind::NotFound,
+        AttachFailureKind::DetachFailed => io::ErrorKind::BrokenPipe,
+    };
+
+    io::Error::new(kind, failure.summary())
 }
 
 /// Detach the active session using the given backend-aware controller.
@@ -512,6 +563,34 @@ mod tests {
                 .label(),
             "not_ready"
         );
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn run_foreground_attach_session_returns_error_for_missing_pid_target() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let source = StaticProcessSampleSource::new(vec![ProcessSample {
+            pid: 410,
+            process_name: "node".into(),
+            executable_path: PathBuf::from("/usr/local/bin/node"),
+        }]);
+        let runtime = crate::runtime::ScriptedInstrumentationRuntime::success_with_messages(vec![]);
+        let mut output = Vec::new();
+
+        let error = super::run_foreground_attach_session(
+            &result,
+            &source,
+            runtime,
+            999_999,
+            &mut output,
+        )
+        .expect_err("missing pid target should fail");
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(error.to_string().contains("999999"));
 
         fs::remove_dir_all(result.config.state_root)?;
         Ok(())
