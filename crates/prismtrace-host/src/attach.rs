@@ -537,6 +537,7 @@ mod tests {
                 url: "https://api.openai.com/v1/responses".into(),
                 headers: vec![],
                 body_text: Some("{}".into()),
+                body_truncated: false,
                 timestamp_ms: 3,
             }
             .to_json_line(),

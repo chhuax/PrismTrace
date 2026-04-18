@@ -67,18 +67,26 @@
   }
 
   function toBodyText(body) {
+    function truncatedText(text) {
+      text = String(text);
+      return {
+        text: text.slice(0, BODY_TEXT_LIMIT_BYTES),
+        truncated: text.length > BODY_TEXT_LIMIT_BYTES,
+      };
+    }
+
     if (typeof body === 'string') {
-      return body.slice(0, BODY_TEXT_LIMIT_BYTES);
+      return truncatedText(body);
     }
 
     if (body && typeof body === 'object' && typeof body.toString === 'function') {
       var text = body.toString();
       if (text !== '[object Object]') {
-        return text.slice(0, BODY_TEXT_LIMIT_BYTES);
+        return truncatedText(text);
       }
     }
 
-    return null;
+    return { text: null, truncated: false };
   }
 
   function emitObservedRequest(observed) {
@@ -89,8 +97,17 @@
       url: observed.url,
       headers: observed.headers,
       body_text: observed.bodyText,
+      body_truncated: observed.bodyTruncated,
       timestamp_ms: Date.now(),
     });
+  }
+
+  function observeRequestSafely(factory) {
+    try {
+      emitObservedRequest(factory());
+    } catch (_) {
+      // Observation must never change request semantics.
+    }
   }
 
   function toUrlString(input) {
@@ -195,15 +212,19 @@
             var originalFetch = globalThis.fetch;
             originals['fetch'] = originalFetch;
             globalThis.fetch = function patchedFetch(input, init) {
-              var method = (init && init.method) || (input && input.method) || 'GET';
-              var headers = normalizeHeaders((init && init.headers) || (input && input.headers) || {});
-              var bodySource = init && Object.prototype.hasOwnProperty.call(init, 'body') ? init.body : input && input.body;
-              emitObservedRequest({
-                hookName: 'fetch',
-                method: String(method).toUpperCase(),
-                url: toUrlString(input),
-                headers: headers,
-                bodyText: toBodyText(bodySource),
+              observeRequestSafely(function () {
+                var method = (init && init.method) || (input && input.method) || 'GET';
+                var headers = normalizeHeaders((init && init.headers) || (input && input.headers) || {});
+                var bodySource = init && Object.prototype.hasOwnProperty.call(init, 'body') ? init.body : input && input.body;
+                var bodyInfo = toBodyText(bodySource);
+                return {
+                  hookName: 'fetch',
+                  method: String(method).toUpperCase(),
+                  url: toUrlString(input),
+                  headers: headers,
+                  bodyText: bodyInfo.text,
+                  bodyTruncated: bodyInfo.truncated,
+                };
               });
               return originalFetch.apply(this, arguments);
             };
@@ -218,12 +239,16 @@
             originals['undici'] = originalRequest;
             undici.request = function patchedUndiciRequest(url, options) {
               options = options || {};
-              emitObservedRequest({
-                hookName: 'undici',
-                method: String(options.method || 'GET').toUpperCase(),
-                url: toUrlString(url),
-                headers: normalizeHeaders(options.headers || {}),
-                bodyText: toBodyText(options.body),
+              observeRequestSafely(function () {
+                var bodyInfo = toBodyText(options.body);
+                return {
+                  hookName: 'undici',
+                  method: String(options.method || 'GET').toUpperCase(),
+                  url: toUrlString(url),
+                  headers: normalizeHeaders(options.headers || {}),
+                  bodyText: bodyInfo.text,
+                  bodyTruncated: bodyInfo.truncated,
+                };
               });
               return originalRequest.apply(this, arguments);
             };
@@ -239,12 +264,16 @@
             http.request = function patchedHttpRequest(options, callbackOptions) {
               var requestOptions =
                 typeof options === 'string' || options instanceof URL ? callbackOptions || {} : options || {};
-              emitObservedRequest({
-                hookName: 'http',
-                method: String(requestOptions.method || 'GET').toUpperCase(),
-                url: requestUrlFromHttpArgs(options, callbackOptions, 'http'),
-                headers: normalizeHeaders(requestOptions.headers || {}),
-                bodyText: toBodyText(requestOptions.body),
+              observeRequestSafely(function () {
+                var bodyInfo = toBodyText(requestOptions.body);
+                return {
+                  hookName: 'http',
+                  method: String(requestOptions.method || 'GET').toUpperCase(),
+                  url: requestUrlFromHttpArgs(options, callbackOptions, 'http'),
+                  headers: normalizeHeaders(requestOptions.headers || {}),
+                  bodyText: bodyInfo.text,
+                  bodyTruncated: bodyInfo.truncated,
+                };
               });
               return originalHttpRequest.apply(this, arguments);
             };
@@ -260,12 +289,16 @@
             https.request = function patchedHttpsRequest(options, callbackOptions) {
               var requestOptions =
                 typeof options === 'string' || options instanceof URL ? callbackOptions || {} : options || {};
-              emitObservedRequest({
-                hookName: 'https',
-                method: String(requestOptions.method || 'GET').toUpperCase(),
-                url: requestUrlFromHttpArgs(options, callbackOptions, 'https'),
-                headers: normalizeHeaders(requestOptions.headers || {}),
-                bodyText: toBodyText(requestOptions.body),
+              observeRequestSafely(function () {
+                var bodyInfo = toBodyText(requestOptions.body);
+                return {
+                  hookName: 'https',
+                  method: String(requestOptions.method || 'GET').toUpperCase(),
+                  url: requestUrlFromHttpArgs(options, callbackOptions, 'https'),
+                  headers: normalizeHeaders(requestOptions.headers || {}),
+                  bodyText: bodyInfo.text,
+                  bodyTruncated: bodyInfo.truncated,
+                };
               });
               return originalHttpsRequest.apply(this, arguments);
             };

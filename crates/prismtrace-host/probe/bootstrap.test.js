@@ -199,3 +199,34 @@ test('http hook ignores non-text request bodies without throwing', function () {
     dispose();
   }
 });
+
+test('fetch hook swallows observation errors and still calls original fetch', async function () {
+  let called = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function fakeFetch() {
+    called = true;
+    return { ok: true, status: 200 };
+  };
+
+  const { installHooks, dispose } = freshModule();
+
+  try {
+    installHooks(['fetch']);
+
+    await assert.doesNotReject(async function () {
+      await globalThis.fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        body: {
+          toString() {
+            throw new Error('boom');
+          },
+        },
+      });
+    });
+
+    assert.equal(called, true, 'original fetch should still be called');
+  } finally {
+    globalThis.fetch = originalFetch;
+    dispose();
+  }
+});

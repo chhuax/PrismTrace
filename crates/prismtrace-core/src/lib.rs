@@ -325,6 +325,7 @@ pub enum IpcMessage {
         url: String,
         headers: Vec<HttpHeader>,
         body_text: Option<String>,
+        body_truncated: bool,
         timestamp_ms: u64,
     },
     DetachAck {
@@ -604,6 +605,7 @@ mod tests {
                 },
             ],
             body_text: Some(r#"{"model":"gpt-4.1","input":"hello"}"#.into()),
+            body_truncated: false,
             timestamp_ms: 1_714_000_003_000,
         };
         let line = msg.to_json_line();
@@ -613,7 +615,7 @@ mod tests {
 
     #[test]
     fn ipc_message_http_request_observed_parses_without_body() {
-        let line = r#"{"type":"http_request_observed","hook_name":"http","method":"GET","url":"https://openrouter.ai/api/v1/chat/completions","headers":[],"body_text":null,"timestamp_ms":9}"#;
+        let line = r#"{"type":"http_request_observed","hook_name":"http","method":"GET","url":"https://openrouter.ai/api/v1/chat/completions","headers":[],"body_text":null,"body_truncated":false,"timestamp_ms":9}"#;
         let parsed = IpcMessage::from_json_line(line).expect("should parse request without body");
         assert_eq!(
             parsed,
@@ -623,6 +625,7 @@ mod tests {
                 url: "https://openrouter.ai/api/v1/chat/completions".into(),
                 headers: vec![],
                 body_text: None,
+                body_truncated: false,
                 timestamp_ms: 9,
             }
         );

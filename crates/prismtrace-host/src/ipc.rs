@@ -101,6 +101,10 @@ impl IpcListener {
     pub fn last_heartbeat_at(&self) -> Option<Instant> {
         Some(self.last_heartbeat)
     }
+
+    pub fn heartbeat_timeout(&self) -> Duration {
+        self.heartbeat_timeout
+    }
 }
 
 #[cfg(test)]
