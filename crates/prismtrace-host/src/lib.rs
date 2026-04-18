@@ -5,8 +5,8 @@ pub mod readiness;
 use attach::{AttachBackend, AttachController, attach_report};
 use discovery::{ProcessSampleSource, discover_targets};
 use prismtrace_core::{AttachFailure, AttachReadiness, AttachSession, ProcessTarget};
-use readiness::evaluate_targets;
 use prismtrace_storage::StorageLayout;
+use readiness::evaluate_targets;
 use std::io;
 use std::path::PathBuf;
 
@@ -149,7 +149,9 @@ pub fn collect_attach_snapshot<B: AttachBackend>(
 ) -> io::Result<AttachSnapshot> {
     let discovered_targets = discover_targets(source)?;
     let readiness_results = evaluate_targets(&discovered_targets);
-    let attach_result = match readiness_results.iter().find(|readiness| readiness.target.pid == pid)
+    let attach_result = match readiness_results
+        .iter()
+        .find(|readiness| readiness.target.pid == pid)
     {
         Some(readiness) => {
             let mut controller = AttachController::new(backend);
@@ -168,7 +170,11 @@ pub fn collect_attach_snapshot<B: AttachBackend>(
 }
 
 pub fn attach_snapshot_report(snapshot: &AttachSnapshot) -> String {
-    [snapshot.summary.clone(), attach_report(&snapshot.attach_result)].join("\n")
+    [
+        snapshot.summary.clone(),
+        attach_report(&snapshot.attach_result),
+    ]
+    .join("\n")
 }
 
 #[cfg(test)]
@@ -368,9 +374,7 @@ mod tests {
         let source = StaticProcessSampleSource::new(vec![ProcessSample {
             pid: 401,
             process_name: "Electron".into(),
-            executable_path: PathBuf::from(
-                "/Applications/Electron.app/Contents/MacOS/Electron",
-            ),
+            executable_path: PathBuf::from("/Applications/Electron.app/Contents/MacOS/Electron"),
         }]);
 
         let snapshot = super::collect_attach_snapshot(

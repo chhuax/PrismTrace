@@ -421,7 +421,10 @@ mod tests {
             AttachFailureKind::HandshakeFailed.label(),
             "handshake_failed"
         );
-        assert_eq!(AttachFailureKind::NoActiveSession.label(), "no_active_session");
+        assert_eq!(
+            AttachFailureKind::NoActiveSession.label(),
+            "no_active_session"
+        );
         assert_eq!(AttachFailureKind::DetachFailed.label(), "detach_failed");
     }
 

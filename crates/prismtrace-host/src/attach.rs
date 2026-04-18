@@ -157,9 +157,7 @@ pub fn attach_report(result: &Result<AttachSession, AttachFailure>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        AttachController, BackendAttachOutcome, ScriptedAttachBackend, attach_report,
-    };
+    use super::{AttachController, BackendAttachOutcome, ScriptedAttachBackend, attach_report};
     use prismtrace_core::{
         AttachFailure, AttachFailureKind, AttachReadiness, AttachReadinessStatus,
         AttachSessionState, ProbeBootstrapState, ProcessTarget, RuntimeKind,
@@ -257,13 +255,11 @@ mod tests {
 
     #[test]
     fn attach_report_renders_success_and_failure_paths() {
-        let success = attach_report(&Ok(
-            AttachController::new(ScriptedAttachBackend::with_outcome(
-                BackendAttachOutcome::ready("probe online"),
-            ))
-            .attach(&supported_readiness(707))
-            .expect("attach should succeed"),
-        ));
+        let success = attach_report(&Ok(AttachController::new(
+            ScriptedAttachBackend::with_outcome(BackendAttachOutcome::ready("probe online")),
+        )
+        .attach(&supported_readiness(707))
+        .expect("attach should succeed")));
 
         let failure = attach_report(&Err(AttachFailure {
             kind: AttachFailureKind::BackendRejected,
