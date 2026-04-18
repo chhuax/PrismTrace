@@ -108,6 +108,36 @@ impl InstrumentationRuntime for ScriptedInstrumentationRuntime {
     }
 }
 
+/// Production instrumentation runtime for Node / Electron processes.
+///
+/// V1 placeholder — real dynamic instrumentation (e.g. via Frida or node --inspect)
+/// will be wired here in a future iteration. Currently returns `InjectionFailed`
+/// so the CLI surfaces a clear error rather than silently doing nothing.
+pub struct NodeInstrumentationRuntime;
+
+impl InstrumentationRuntime for NodeInstrumentationRuntime {
+    fn inject_probe(
+        &self,
+        pid: u32,
+        _probe_script: &str,
+    ) -> Result<Box<dyn BufRead + Send>, InstrumentationError> {
+        Err(InstrumentationError {
+            kind: InstrumentationErrorKind::InjectionFailed,
+            message: format!(
+                "real instrumentation backend not yet implemented (pid {pid}); \
+                 use a supported dynamic instrumentation tool"
+            ),
+        })
+    }
+
+    fn send_detach_signal(&self, pid: u32) -> Result<(), InstrumentationError> {
+        Err(InstrumentationError {
+            kind: InstrumentationErrorKind::DetachFailed,
+            message: format!("real instrumentation backend not yet implemented (pid {pid})"),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -234,35 +264,5 @@ mod tests {
 
         assert_eq!(err.kind, InstrumentationErrorKind::ProcessNotFound);
         assert_eq!(err.message, "pid 9999 not found");
-    }
-}
-
-/// Production instrumentation runtime for Node / Electron processes.
-///
-/// V1 placeholder — real dynamic instrumentation (e.g. via Frida or node --inspect)
-/// will be wired here in a future iteration. Currently returns `InjectionFailed`
-/// so the CLI surfaces a clear error rather than silently doing nothing.
-pub struct NodeInstrumentationRuntime;
-
-impl InstrumentationRuntime for NodeInstrumentationRuntime {
-    fn inject_probe(
-        &self,
-        pid: u32,
-        _probe_script: &str,
-    ) -> Result<Box<dyn BufRead + Send>, InstrumentationError> {
-        Err(InstrumentationError {
-            kind: InstrumentationErrorKind::InjectionFailed,
-            message: format!(
-                "real instrumentation backend not yet implemented (pid {pid}); \
-                 use a supported dynamic instrumentation tool"
-            ),
-        })
-    }
-
-    fn send_detach_signal(&self, pid: u32) -> Result<(), InstrumentationError> {
-        Err(InstrumentationError {
-            kind: InstrumentationErrorKind::DetachFailed,
-            message: format!("real instrumentation backend not yet implemented (pid {pid})"),
-        })
     }
 }
