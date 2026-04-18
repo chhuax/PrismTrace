@@ -11,17 +11,20 @@ surfaces:
       - current working directory as workspace root
       - optional --discover flag
       - optional --readiness flag
+      - optional --attach <pid> flag
     outputs:
       - startup summary
       - process discovery report
       - attach readiness report
+      - attach session report
 
   - id: prismtrace-core-domain
     kind: library
     path: crates/prismtrace-core/src/lib.rs
     summary: >
       Shared runtime and process domain types, including process samples,
-      normalized process targets, runtime classification, and probe health.
+      normalized process targets, runtime classification, attach session state,
+      and probe health.
 
   - id: prismtrace-storage-bootstrap
     kind: library

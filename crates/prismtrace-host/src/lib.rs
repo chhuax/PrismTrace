@@ -1,10 +1,12 @@
+pub mod attach;
 pub mod discovery;
 pub mod readiness;
 
+use attach::{AttachBackend, AttachController, attach_report};
 use discovery::{ProcessSampleSource, discover_targets};
-use prismtrace_core::{AttachReadiness, ProcessTarget};
-use prismtrace_storage::StorageLayout;
+use prismtrace_core::{AttachFailure, AttachReadiness, AttachSession, ProcessTarget};
 use readiness::evaluate_targets;
+use prismtrace_storage::StorageLayout;
 use std::io;
 use std::path::PathBuf;
 
@@ -46,6 +48,12 @@ pub struct HostSnapshot {
 pub struct ReadinessSnapshot {
     pub summary: String,
     pub readiness_results: Vec<AttachReadiness>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachSnapshot {
+    pub summary: String,
+    pub attach_result: Result<AttachSession, AttachFailure>,
 }
 
 pub fn bootstrap(root: impl Into<PathBuf>) -> io::Result<BootstrapResult> {
@@ -131,6 +139,36 @@ pub fn readiness_report(snapshot: &ReadinessSnapshot) -> String {
     );
 
     report.join("\n")
+}
+
+pub fn collect_attach_snapshot<B: AttachBackend>(
+    result: &BootstrapResult,
+    source: &impl ProcessSampleSource,
+    backend: B,
+    pid: u32,
+) -> io::Result<AttachSnapshot> {
+    let discovered_targets = discover_targets(source)?;
+    let readiness_results = evaluate_targets(&discovered_targets);
+    let attach_result = match readiness_results.iter().find(|readiness| readiness.target.pid == pid)
+    {
+        Some(readiness) => {
+            let mut controller = AttachController::new(backend);
+            controller.attach(readiness)
+        }
+        None => Err(AttachFailure {
+            kind: prismtrace_core::AttachFailureKind::NotReady,
+            reason: format!("no discovered target with pid {pid} is available for attach"),
+        }),
+    };
+
+    Ok(AttachSnapshot {
+        summary: startup_summary(result),
+        attach_result,
+    })
+}
+
+pub fn attach_snapshot_report(snapshot: &AttachSnapshot) -> String {
+    [snapshot.summary.clone(), attach_report(&snapshot.attach_result)].join("\n")
 }
 
 #[cfg(test)]
@@ -318,6 +356,95 @@ mod tests {
         assert!(report.contains("Evaluated 2 attach readiness results"));
         assert!(report.contains("[supported] Electron"));
         assert!(report.contains("[permission_denied] launchd"));
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn collect_attach_snapshot_returns_structured_attached_session() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let source = StaticProcessSampleSource::new(vec![ProcessSample {
+            pid: 401,
+            process_name: "Electron".into(),
+            executable_path: PathBuf::from(
+                "/Applications/Electron.app/Contents/MacOS/Electron",
+            ),
+        }]);
+
+        let snapshot = super::collect_attach_snapshot(
+            &result,
+            &source,
+            crate::attach::ScriptedAttachBackend::ready(),
+            401,
+        )?;
+
+        assert_eq!(
+            snapshot
+                .attach_result
+                .as_ref()
+                .expect("attach should succeed")
+                .state
+                .label(),
+            "attached"
+        );
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn collect_attach_snapshot_returns_structured_failure_for_unknown_pid() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let source = StaticProcessSampleSource::new(vec![ProcessSample {
+            pid: 402,
+            process_name: "node".into(),
+            executable_path: PathBuf::from("/usr/local/bin/node"),
+        }]);
+
+        let snapshot = super::collect_attach_snapshot(
+            &result,
+            &source,
+            crate::attach::ScriptedAttachBackend::ready(),
+            999,
+        )?;
+
+        assert_eq!(
+            snapshot
+                .attach_result
+                .as_ref()
+                .expect_err("missing pid should fail")
+                .kind
+                .label(),
+            "not_ready"
+        );
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn attach_report_lists_startup_summary_and_attach_result() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let source = StaticProcessSampleSource::new(vec![ProcessSample {
+            pid: 403,
+            process_name: "node".into(),
+            executable_path: PathBuf::from("/usr/local/bin/node"),
+        }]);
+
+        let snapshot = super::collect_attach_snapshot(
+            &result,
+            &source,
+            crate::attach::ScriptedAttachBackend::ready(),
+            403,
+        )?;
+        let report = super::attach_snapshot_report(&snapshot);
+
+        assert!(report.contains("PrismTrace host skeleton"));
+        assert!(report.contains("[attached]"));
 
         fs::remove_dir_all(result.config.state_root)?;
         Ok(())

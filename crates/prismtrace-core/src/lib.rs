@@ -140,6 +140,104 @@ impl AttachReadiness {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachSessionState {
+    Attaching,
+    Attached,
+    Detached,
+    Failed,
+}
+
+impl AttachSessionState {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Attaching => "attaching",
+            Self::Attached => "attached",
+            Self::Detached => "detached",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachFailureKind {
+    NotReady,
+    ActiveSessionExists,
+    BackendRejected,
+    HandshakeFailed,
+    NoActiveSession,
+    DetachFailed,
+}
+
+impl AttachFailureKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::NotReady => "not_ready",
+            Self::ActiveSessionExists => "active_session_exists",
+            Self::BackendRejected => "backend_rejected",
+            Self::HandshakeFailed => "handshake_failed",
+            Self::NoActiveSession => "no_active_session",
+            Self::DetachFailed => "detach_failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachFailure {
+    pub kind: AttachFailureKind,
+    pub reason: String,
+}
+
+impl AttachFailure {
+    pub fn summary(&self) -> String {
+        format!("[{}] {}", self.kind.label(), self.reason)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeBootstrapState {
+    Pending,
+    Ready,
+    Failed,
+}
+
+impl ProbeBootstrapState {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Ready => "ready",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbeBootstrap {
+    pub state: ProbeBootstrapState,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachSession {
+    pub target: ProcessTarget,
+    pub state: AttachSessionState,
+    pub detail: String,
+    pub bootstrap: Option<ProbeBootstrap>,
+    pub failure: Option<AttachFailure>,
+}
+
+impl AttachSession {
+    pub fn summary(&self) -> String {
+        format!(
+            "[{}] {} (pid {}): {}",
+            self.state.label(),
+            self.target.display_name(),
+            self.target.pid,
+            self.detail
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProbeState {
     Detached,
     Attaching,
@@ -173,8 +271,9 @@ impl ProbeHealth {
 #[cfg(test)]
 mod tests {
     use super::{
-        AttachReadiness, AttachReadinessStatus, ProbeHealth, ProbeState, ProcessSample,
-        ProcessTarget, RuntimeKind,
+        AttachFailure, AttachFailureKind, AttachReadiness, AttachReadinessStatus, AttachSession,
+        AttachSessionState, ProbeBootstrap, ProbeBootstrapState, ProbeHealth, ProbeState,
+        ProcessSample, ProcessTarget, RuntimeKind,
     };
     use std::path::PathBuf;
 
@@ -296,6 +395,79 @@ mod tests {
         assert_eq!(
             readiness.summary(),
             "[unknown] Codex (pid 501): runtime classification is not strong enough yet"
+        );
+    }
+
+    #[test]
+    fn attach_session_state_labels_are_stable() {
+        assert_eq!(AttachSessionState::Attaching.label(), "attaching");
+        assert_eq!(AttachSessionState::Attached.label(), "attached");
+        assert_eq!(AttachSessionState::Detached.label(), "detached");
+        assert_eq!(AttachSessionState::Failed.label(), "failed");
+    }
+
+    #[test]
+    fn attach_failure_kind_labels_are_stable() {
+        assert_eq!(AttachFailureKind::NotReady.label(), "not_ready");
+        assert_eq!(
+            AttachFailureKind::ActiveSessionExists.label(),
+            "active_session_exists"
+        );
+        assert_eq!(
+            AttachFailureKind::BackendRejected.label(),
+            "backend_rejected"
+        );
+        assert_eq!(
+            AttachFailureKind::HandshakeFailed.label(),
+            "handshake_failed"
+        );
+        assert_eq!(AttachFailureKind::NoActiveSession.label(), "no_active_session");
+        assert_eq!(AttachFailureKind::DetachFailed.label(), "detach_failed");
+    }
+
+    #[test]
+    fn probe_bootstrap_state_labels_are_stable() {
+        assert_eq!(ProbeBootstrapState::Pending.label(), "pending");
+        assert_eq!(ProbeBootstrapState::Ready.label(), "ready");
+        assert_eq!(ProbeBootstrapState::Failed.label(), "failed");
+    }
+
+    #[test]
+    fn attach_failure_summary_includes_kind_and_reason() {
+        let failure = AttachFailure {
+            kind: AttachFailureKind::HandshakeFailed,
+            reason: "probe handshake did not complete".into(),
+        };
+
+        assert_eq!(
+            failure.summary(),
+            "[handshake_failed] probe handshake did not complete"
+        );
+    }
+
+    #[test]
+    fn attach_session_summary_includes_state_target_and_detail() {
+        let session = AttachSession {
+            target: ProcessTarget {
+                pid: 601,
+                app_name: "Electron".into(),
+                executable_path: PathBuf::from(
+                    "/Applications/Electron.app/Contents/MacOS/Electron",
+                ),
+                runtime_kind: RuntimeKind::Electron,
+            },
+            state: AttachSessionState::Attached,
+            detail: "probe handshake completed".into(),
+            bootstrap: Some(ProbeBootstrap {
+                state: ProbeBootstrapState::Ready,
+                message: "probe online".into(),
+            }),
+            failure: None,
+        };
+
+        assert_eq!(
+            session.summary(),
+            "[attached] Electron (pid 601): probe handshake completed"
         );
     }
 }
