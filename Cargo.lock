@@ -28,6 +28,7 @@ version = "0.1.0"
 dependencies = [
  "prismtrace-core",
  "prismtrace-storage",
+ "serde_json",
 ]
 
 [[package]]

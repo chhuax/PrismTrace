@@ -102,6 +102,10 @@ impl<R: InstrumentationRuntime> LiveAttachBackend<R> {
             ipc_listener: None,
         }
     }
+
+    pub fn listener_mut(&mut self) -> Option<&mut IpcListener> {
+        self.ipc_listener.as_mut()
+    }
 }
 
 pub const DETACH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -335,6 +339,7 @@ mod tests {
         AttachBackend, AttachController, BackendAttachOutcome, LiveAttachBackend,
         ScriptedAttachBackend, attach_report,
     };
+    use crate::ipc::IpcEvent;
     use crate::runtime::{InstrumentationErrorKind, ScriptedInstrumentationRuntime};
     use prismtrace_core::{
         AttachFailure, AttachFailureKind, AttachReadiness, AttachReadinessStatus,
@@ -520,6 +525,37 @@ mod tests {
             .expect("attach should succeed");
 
         assert_eq!(outcome.bootstrap.state, ProbeBootstrapState::Ready);
+    }
+
+    #[test]
+    fn live_backend_next_event_returns_observed_request_after_bootstrap() {
+        let runtime = ScriptedInstrumentationRuntime::success_with_messages(vec![
+            bootstrap_report_line(),
+            IpcMessage::HttpRequestObserved {
+                hook_name: "fetch".into(),
+                method: "POST".into(),
+                url: "https://api.openai.com/v1/responses".into(),
+                headers: vec![],
+                body_text: Some("{}".into()),
+                timestamp_ms: 3,
+            }
+            .to_json_line(),
+        ]);
+        let mut backend = LiveAttachBackend::new(runtime);
+        let target = supported_readiness(807).target;
+
+        backend.attach(&target).expect("attach should succeed");
+        let event = backend
+            .listener_mut()
+            .expect("listener should still be available")
+            .next_event();
+
+        match event {
+            IpcEvent::Message(IpcMessage::HttpRequestObserved { url, .. }) => {
+                assert_eq!(url, "https://api.openai.com/v1/responses");
+            }
+            _ => panic!("expected observed request event"),
+        }
     }
 
     #[test]

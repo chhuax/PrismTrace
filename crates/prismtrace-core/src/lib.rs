@@ -277,6 +277,12 @@ pub struct IpcParseError {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HttpHeader {
+    pub name: String,
+    pub value: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IpcParseErrorKind {
     /// The input was not valid JSON.
@@ -313,6 +319,14 @@ pub enum IpcMessage {
         failed_hooks: Vec<String>,
         timestamp_ms: u64,
     },
+    HttpRequestObserved {
+        hook_name: String,
+        method: String,
+        url: String,
+        headers: Vec<HttpHeader>,
+        body_text: Option<String>,
+        timestamp_ms: u64,
+    },
     DetachAck {
         timestamp_ms: u64,
     },
@@ -347,8 +361,8 @@ impl IpcMessage {
 mod tests {
     use super::{
         AttachFailure, AttachFailureKind, AttachReadiness, AttachReadinessStatus, AttachSession,
-        AttachSessionState, IpcMessage, IpcParseErrorKind, ProbeBootstrap, ProbeBootstrapState,
-        ProbeHealth, ProbeState, ProcessSample, ProcessTarget, RuntimeKind,
+        AttachSessionState, HttpHeader, IpcMessage, IpcParseErrorKind, ProbeBootstrap,
+        ProbeBootstrapState, ProbeHealth, ProbeState, ProcessSample, ProcessTarget, RuntimeKind,
     };
     use std::path::PathBuf;
 
@@ -571,6 +585,47 @@ mod tests {
         let line = msg.to_json_line();
         let parsed = IpcMessage::from_json_line(&line).expect("should parse bootstrap_report");
         assert_eq!(parsed, msg);
+    }
+
+    #[test]
+    fn ipc_message_http_request_observed_round_trip() {
+        let msg = IpcMessage::HttpRequestObserved {
+            hook_name: "fetch".into(),
+            method: "POST".into(),
+            url: "https://api.openai.com/v1/responses".into(),
+            headers: vec![
+                HttpHeader {
+                    name: "authorization".into(),
+                    value: "Bearer sk-test".into(),
+                },
+                HttpHeader {
+                    name: "content-type".into(),
+                    value: "application/json".into(),
+                },
+            ],
+            body_text: Some(r#"{"model":"gpt-4.1","input":"hello"}"#.into()),
+            timestamp_ms: 1_714_000_003_000,
+        };
+        let line = msg.to_json_line();
+        let parsed = IpcMessage::from_json_line(&line).expect("should parse request event");
+        assert_eq!(parsed, msg);
+    }
+
+    #[test]
+    fn ipc_message_http_request_observed_parses_without_body() {
+        let line = r#"{"type":"http_request_observed","hook_name":"http","method":"GET","url":"https://openrouter.ai/api/v1/chat/completions","headers":[],"body_text":null,"timestamp_ms":9}"#;
+        let parsed = IpcMessage::from_json_line(line).expect("should parse request without body");
+        assert_eq!(
+            parsed,
+            IpcMessage::HttpRequestObserved {
+                hook_name: "http".into(),
+                method: "GET".into(),
+                url: "https://openrouter.ai/api/v1/chat/completions".into(),
+                headers: vec![],
+                body_text: None,
+                timestamp_ms: 9,
+            }
+        );
     }
 
     #[test]
