@@ -1,9 +1,15 @@
 use prismtrace_core::IpcMessage;
 use std::io::BufRead;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+pub trait ReaderShutdown: Send + Sync {
+    fn shutdown(&self);
+}
 
 pub struct IpcListener {
     reader: Box<dyn BufRead + Send>,
+    shutdown: Option<Arc<dyn ReaderShutdown>>,
     heartbeat_timeout: Duration,
     last_heartbeat: Instant,
 }
@@ -18,6 +24,20 @@ impl IpcListener {
     pub fn new(reader: Box<dyn BufRead + Send>, heartbeat_timeout: Duration) -> Self {
         Self {
             reader,
+            shutdown: None,
+            heartbeat_timeout,
+            last_heartbeat: Instant::now(),
+        }
+    }
+
+    pub fn new_with_shutdown(
+        reader: Box<dyn BufRead + Send>,
+        heartbeat_timeout: Duration,
+        shutdown: Arc<dyn ReaderShutdown>,
+    ) -> Self {
+        Self {
+            reader,
+            shutdown: Some(shutdown),
             heartbeat_timeout,
             last_heartbeat: Instant::now(),
         }
@@ -100,6 +120,14 @@ impl IpcListener {
 
     pub fn last_heartbeat_at(&self) -> Option<Instant> {
         Some(self.last_heartbeat)
+    }
+
+    pub fn heartbeat_timeout(&self) -> Duration {
+        self.heartbeat_timeout
+    }
+
+    pub fn shutdown_handle(&self) -> Option<Arc<dyn ReaderShutdown>> {
+        self.shutdown.clone()
     }
 }
 

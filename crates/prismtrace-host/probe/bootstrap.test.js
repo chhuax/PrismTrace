@@ -122,3 +122,111 @@ test('removeAllHooks clears installed hooks', function () {
     dispose();
   }
 });
+
+test('fetch hook emits http_request_observed for JSON request bodies', async function () {
+  const writes = [];
+  const originalWrite = process.stdout.write;
+  process.stdout.write = function (chunk) {
+    writes.push(String(chunk));
+    return true;
+  };
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function fakeFetch() {
+    return { ok: true, status: 200 };
+  };
+
+  const { installHooks, dispose } = freshModule();
+
+  try {
+    installHooks(['fetch']);
+
+    await globalThis.fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { authorization: 'Bearer sk-test', 'content-type': 'application/json' },
+      body: '{"model":"gpt-4.1","input":"hello"}',
+    });
+
+    const observed = writes.find((chunk) => chunk.includes('"type":"http_request_observed"'));
+    assert.ok(observed, 'expected one emitted request event');
+    assert.match(observed, /"hook_name":"fetch"/);
+    assert.ok(
+      observed.includes('"url":"https://api.openai.com/v1/responses"'),
+      'expected observed event to include request url'
+    );
+    assert.match(observed, /"method":"POST"/);
+  } finally {
+    process.stdout.write = originalWrite;
+    globalThis.fetch = originalFetch;
+    dispose();
+  }
+});
+
+test('http hook ignores non-text request bodies without throwing', function () {
+  const writes = [];
+  const originalWrite = process.stdout.write;
+  process.stdout.write = function (chunk) {
+    writes.push(String(chunk));
+    return true;
+  };
+
+  const http = require('http');
+  const originalRequest = http.request;
+  http.request = function fakeRequest() {
+    return {
+      on() {},
+      once() {},
+      write() {},
+      end() {},
+    };
+  };
+
+  const { installHooks, dispose } = freshModule();
+
+  try {
+    installHooks(['http']);
+    http.request('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': 'test' },
+    });
+
+    const observed = writes.find((chunk) => chunk.includes('"type":"http_request_observed"'));
+    assert.ok(observed, 'expected one emitted request event');
+    assert.match(observed, /"hook_name":"http"/);
+  } finally {
+    process.stdout.write = originalWrite;
+    http.request = originalRequest;
+    dispose();
+  }
+});
+
+test('fetch hook swallows observation errors and still calls original fetch', async function () {
+  let called = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function fakeFetch() {
+    called = true;
+    return { ok: true, status: 200 };
+  };
+
+  const { installHooks, dispose } = freshModule();
+
+  try {
+    installHooks(['fetch']);
+
+    await assert.doesNotReject(async function () {
+      await globalThis.fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        body: {
+          toString() {
+            throw new Error('boom');
+          },
+        },
+      });
+    });
+
+    assert.equal(called, true, 'original fetch should still be called');
+  } finally {
+    globalThis.fetch = originalFetch;
+    dispose();
+  }
+});

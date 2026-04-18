@@ -1,3 +1,22 @@
 /target
 /.prismtrace
 /state
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.Spotlight-V100/
+.Trashes/
+._*
+
+# Editors and IDEs
+.idea/
+.vscode/
+.vs/
+.fleet/
+.zed/
+*.swp
+*.swo
+*~

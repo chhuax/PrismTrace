@@ -3,6 +3,7 @@ pub mod discovery;
 pub mod ipc;
 pub mod probe_health;
 pub mod readiness;
+pub mod request_capture;
 pub mod runtime;
 
 use attach::{AttachBackend, AttachController, attach_report};

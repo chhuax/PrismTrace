@@ -60,6 +60,7 @@ impl ProbeHealthStore {
             IpcEvent::Message(IpcMessage::DetachAck { .. }) => {
                 self.session_state = ProbeSessionState::Disconnected;
             }
+            IpcEvent::Message(IpcMessage::HttpRequestObserved { .. }) => {}
             IpcEvent::HeartbeatTimeout { .. } => {
                 self.session_state = ProbeSessionState::TimedOut;
             }
