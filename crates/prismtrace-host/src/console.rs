@@ -150,35 +150,6 @@ fn filter_request_summaries(
         .collect()
 }
 
-fn filter_request_details(
-    details: &[ConsoleRequestDetail],
-    filter: Option<&ConsoleTargetFilterConfig>,
-) -> Vec<ConsoleRequestDetail> {
-    let Some(filter) = filter else {
-        return details.to_vec();
-    };
-
-    if !filter.is_enabled() {
-        return details.to_vec();
-    }
-
-    details
-        .iter()
-        .filter(|detail| {
-            let target = ProcessTarget {
-                pid: 0,
-                app_name: detail.target_display_name.clone(),
-                executable_path: PathBuf::from(&detail.target_display_name),
-                command_line: None,
-                runtime_kind: prismtrace_core::RuntimeKind::Unknown,
-            };
-
-            filter.matches_target(&target)
-        })
-        .cloned()
-        .collect()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsoleActivityItem {
     pub activity_id: String,
@@ -233,6 +204,7 @@ pub struct ConsoleRequestDetail {
 #[derive(Debug, Clone)]
 struct RequestArtifactRecord {
     request_id: String,
+    pid: Option<u32>,
     captured_at_ms: u64,
     provider: String,
     model: Option<String>,
@@ -255,6 +227,9 @@ pub struct ConsoleActivitySource<'a> {
 pub struct ConsoleServer {
     listener: TcpListener,
     snapshot: ConsoleSnapshot,
+    result: BootstrapResult,
+    bind_addr: String,
+    filter: Option<ConsoleTargetFilterConfig>,
 }
 
 impl ConsoleServer {
@@ -268,19 +243,37 @@ impl ConsoleServer {
 
     pub fn serve_once(&self) -> io::Result<()> {
         let (mut stream, _) = self.listener.accept()?;
-        write_console_response(&mut stream, &self.snapshot)
+        write_live_console_response(
+            &mut stream,
+            &self.result,
+            &self.bind_addr,
+            self.filter.as_ref(),
+        )
     }
 
     pub fn serve_forever(&self) -> io::Result<()> {
         loop {
             let (mut stream, _) = self.listener.accept()?;
-            write_console_response(&mut stream, &self.snapshot)?;
+            write_live_console_response(
+                &mut stream,
+                &self.result,
+                &self.bind_addr,
+                self.filter.as_ref(),
+            )?;
         }
     }
 }
 
 pub fn collect_console_snapshot(
     result: &BootstrapResult,
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> ConsoleSnapshot {
+    collect_console_snapshot_for_bind_addr(result, &result.config.bind_addr, filter)
+}
+
+fn collect_console_snapshot_for_bind_addr(
+    result: &BootstrapResult,
+    bind_addr: &str,
     filter: Option<&ConsoleTargetFilterConfig>,
 ) -> ConsoleSnapshot {
     let (_, unmatched_targets, target_summaries) =
@@ -290,14 +283,11 @@ pub fn collect_console_snapshot(
         &load_request_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
         filter,
     );
-    let request_details = filter_request_details(
-        &load_request_details(&result.storage).unwrap_or_else(|_| Vec::new()),
-        filter,
-    );
+    let recent_requests = load_recent_request_activity(&result.storage);
 
     ConsoleSnapshot {
         summary: crate::startup_summary(result),
-        bind_addr: format!("http://{}", result.config.bind_addr),
+        bind_addr: format!("http://{bind_addr}"),
         filter_context: console_filter_context(filter),
         target_summaries,
         activity_items: collect_activity_items_filtered(
@@ -306,14 +296,14 @@ pub fn collect_console_snapshot(
                 attach_occurred_at_ms: None,
                 probe_health: None,
                 probe_occurred_at_ms: None,
-                recent_requests: &[],
+                recent_requests: &recent_requests,
                 known_errors: &[],
             },
             filter,
             &unmatched_targets,
         ),
         request_summaries,
-        request_details,
+        request_details: Vec::new(),
     }
 }
 
@@ -386,15 +376,24 @@ pub fn start_console_server_on_bind_addr(
                 &load_request_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
                 filter,
             ),
-            request_details: filter_request_details(
-                &load_request_details(&result.storage).unwrap_or_else(|_| Vec::new()),
-                filter,
-            ),
+            request_details: Vec::new(),
         },
+        result: result.clone(),
+        bind_addr: local_addr.to_string(),
+        filter: filter.cloned(),
     })
 }
 
+#[cfg(test)]
 fn write_console_response(stream: &mut TcpStream, snapshot: &ConsoleSnapshot) -> io::Result<()> {
+    write_console_response_with_storage(stream, snapshot, None)
+}
+
+fn write_console_response_with_storage(
+    stream: &mut TcpStream,
+    snapshot: &ConsoleSnapshot,
+    storage: Option<&StorageLayout>,
+) -> io::Result<()> {
     let request_path = read_request_path(stream)?;
     let (status_line, content_type, body) = match request_path.as_deref() {
         Some("/") => (
@@ -437,15 +436,16 @@ fn write_console_response(stream: &mut TcpStream, snapshot: &ConsoleSnapshot) ->
                 snapshot.filter_context.as_ref(),
             ),
         ),
-        Some(path) if path.starts_with("/api/requests/") => (
-            "HTTP/1.1 200 OK",
-            "application/json; charset=utf-8",
-            render_request_detail_payload(
-                path.trim_start_matches("/api/requests/"),
-                &snapshot.request_details,
-                snapshot.filter_context.as_ref(),
-            ),
-        ),
+        Some(path) if path.starts_with("/api/requests/") => {
+            ("HTTP/1.1 200 OK", "application/json; charset=utf-8", {
+                let request_id = path.trim_start_matches("/api/requests/");
+                let detail = match storage {
+                    Some(storage) => load_request_detail(storage, request_id).ok().flatten(),
+                    None => load_request_detail_from_snapshot(snapshot, request_id),
+                };
+                render_request_detail_payload(request_id, detail, snapshot.filter_context.as_ref())
+            })
+        }
         Some(_) => (
             "HTTP/1.1 404 Not Found",
             "text/html; charset=utf-8",
@@ -466,6 +466,16 @@ fn write_console_response(stream: &mut TcpStream, snapshot: &ConsoleSnapshot) ->
 
     stream.write_all(response.as_bytes())?;
     stream.flush()
+}
+
+fn write_live_console_response(
+    stream: &mut TcpStream,
+    result: &BootstrapResult,
+    bind_addr: &str,
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> io::Result<()> {
+    let snapshot = collect_console_snapshot_for_bind_addr(result, bind_addr, filter);
+    write_console_response_with_storage(stream, &snapshot, Some(&result.storage))
 }
 
 fn read_request_path(stream: &mut TcpStream) -> io::Result<Option<String>> {
@@ -1461,47 +1471,69 @@ pub fn load_request_summaries(storage: &StorageLayout) -> io::Result<Vec<Console
     Ok(summaries)
 }
 
-pub fn load_request_detail(
-    storage: &StorageLayout,
-    request_id: &str,
-) -> io::Result<Option<ConsoleRequestDetail>> {
-    Ok(load_request_details(storage)?
+fn load_recent_request_activity(storage: &StorageLayout) -> Vec<ConsoleRecentRequestActivity> {
+    load_request_records(storage)
+        .unwrap_or_default()
         .into_iter()
-        .find(|detail| detail.request_id == request_id))
-}
-
-fn load_request_details(storage: &StorageLayout) -> io::Result<Vec<ConsoleRequestDetail>> {
-    let mut details = load_request_records(storage)?
-        .into_iter()
-        .map(|record| {
-            let request_summary = format!(
+        .map(|record| ConsoleRecentRequestActivity {
+            request_id: record.request_id,
+            captured_at_ms: record.captured_at_ms,
+            title: format!("Captured {} request", record.provider),
+            subtitle: format!(
                 "{} {} {}",
                 record.provider,
                 record.method,
                 request_path_only(&record.url)
-            );
-
-            ConsoleRequestDetail {
-                request_id: record.request_id,
-                captured_at_ms: record.captured_at_ms,
-                provider: record.provider,
-                model: record.model,
-                target_display_name: record.target_display_name,
-                artifact_path: record.artifact_path.display().to_string(),
-                request_summary,
-                probe_context: None,
-            }
+            ),
+            related_pid: record.pid,
         })
-        .collect::<Vec<_>>();
+        .collect()
+}
 
-    details.sort_by(|left, right| {
-        right
-            .captured_at_ms
-            .cmp(&left.captured_at_ms)
-            .then_with(|| left.request_id.cmp(&right.request_id))
-    });
+pub fn load_request_detail(
+    storage: &StorageLayout,
+    request_id: &str,
+) -> io::Result<Option<ConsoleRequestDetail>> {
+    let requests_dir = storage.artifacts_dir.join("requests");
+    if !requests_dir.exists() {
+        return Ok(None);
+    }
 
-    Ok(details)
+    for entry in fs::read_dir(&requests_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+
+        let Some(record) = read_request_record(&path)? else {
+            continue;
+        };
+
+        if record.request_id != request_id {
+            continue;
+        }
+
+        let request_summary = format!(
+            "{} {} {}",
+            record.provider,
+            record.method,
+            request_path_only(&record.url)
+        );
+
+        return Ok(Some(ConsoleRequestDetail {
+            request_id: record.request_id,
+            captured_at_ms: record.captured_at_ms,
+            provider: record.provider,
+            model: record.model,
+            target_display_name: record.target_display_name,
+            artifact_path: record.artifact_path.display().to_string(),
+            request_summary,
+            probe_context: None,
+        }));
+    }
+
+    Ok(None)
 }
 
 fn load_request_records(storage: &StorageLayout) -> io::Result<Vec<RequestArtifactRecord>> {
@@ -1518,8 +1550,10 @@ fn load_request_records(storage: &StorageLayout) -> io::Result<Vec<RequestArtifa
             continue;
         }
 
-        if let Some(record) = read_request_record(&path)? {
-            records.push(record);
+        match read_request_record(&path) {
+            Ok(Some(record)) => records.push(record),
+            Ok(None) => {}
+            Err(_) => continue,
         }
     }
 
@@ -1538,6 +1572,10 @@ fn read_request_record(path: &Path) -> io::Result<Option<RequestArtifactRecord>>
         .get("captured_at_ms")
         .and_then(Value::as_u64)
         .unwrap_or_default();
+    let pid = value
+        .get("pid")
+        .and_then(Value::as_u64)
+        .and_then(|pid| u32::try_from(pid).ok());
     let provider = value
         .get("provider_hint")
         .and_then(Value::as_str)
@@ -1565,6 +1603,7 @@ fn read_request_record(path: &Path) -> io::Result<Option<RequestArtifactRecord>>
 
     Ok(Some(RequestArtifactRecord {
         request_id: request_id.to_string(),
+        pid,
         captured_at_ms,
         provider,
         model,
@@ -1611,12 +1650,9 @@ fn render_requests_payload(
 
 fn render_request_detail_payload(
     request_id: &str,
-    details: &[ConsoleRequestDetail],
+    detail: Option<ConsoleRequestDetail>,
     filter_context: Option<&ConsoleFilterContext>,
 ) -> String {
-    let detail = details
-        .iter()
-        .find(|detail| detail.request_id == request_id);
     let mut payload = match detail {
         Some(detail) => json!({
             "request": {
@@ -1640,6 +1676,21 @@ fn render_request_detail_payload(
     };
     append_filter_context_fields(&mut payload, filter_context);
     payload.to_string()
+}
+
+fn load_request_detail_from_snapshot(
+    snapshot: &ConsoleSnapshot,
+    request_id: &str,
+) -> Option<ConsoleRequestDetail> {
+    if let Some(detail) = snapshot
+        .request_details
+        .iter()
+        .find(|detail| detail.request_id == request_id)
+    {
+        return Some(detail.clone());
+    }
+
+    None
 }
 
 fn append_filter_context_fields(
@@ -2331,7 +2382,7 @@ mod tests {
 
     #[test]
     fn render_request_detail_payload_marks_missing_detail_with_status() {
-        let payload = super::render_request_detail_payload("missing-request", &[], None);
+        let payload = super::render_request_detail_payload("missing-request", None, None);
 
         assert!(
             payload.contains("\"status\":\"not_found\""),
@@ -2778,6 +2829,25 @@ mod tests {
     fn console_server_returns_activity_api_payload() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
+        let requests_dir = result.storage.artifacts_dir.join("requests");
+        fs::create_dir_all(&requests_dir)?;
+        fs::write(
+            requests_dir.join("1714000004000-42-1.json"),
+            serde_json::json!({
+                "event_id": "42-1714000004000-1",
+                "pid": 42,
+                "target_display_name": "Codex",
+                "provider_hint": "openai",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.openai.com/v1/responses",
+                "body_text": "{\"model\":\"gpt-4.1\",\"input\":\"hello\"}",
+                "body_size_bytes": 34,
+                "truncated": false,
+                "captured_at_ms": 1714000004000u64,
+            })
+            .to_string(),
+        )?;
         let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
         let addr = server
             .local_url()?
@@ -2793,6 +2863,10 @@ mod tests {
             "response: {response}"
         );
         assert!(response.contains("\"activity\""), "response: {response}");
+        assert!(
+            response.contains("Captured openai request"),
+            "response: {response}"
+        );
 
         handle.join().expect("server thread should join")?;
         fs::remove_dir_all(result.config.state_root)?;
@@ -2803,6 +2877,26 @@ mod tests {
     fn console_server_returns_requests_api_payload() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
+        let requests_dir = result.storage.artifacts_dir.join("requests");
+        fs::create_dir_all(&requests_dir)?;
+        fs::write(requests_dir.join("bad.json"), "{not-json")?;
+        fs::write(
+            requests_dir.join("1714000004000-42-1.json"),
+            serde_json::json!({
+                "event_id": "42-1714000004000-1",
+                "pid": 42,
+                "target_display_name": "Codex",
+                "provider_hint": "openai",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.openai.com/v1/responses",
+                "body_text": "{\"model\":\"gpt-4.1\",\"input\":\"hello\"}",
+                "body_size_bytes": 34,
+                "truncated": false,
+                "captured_at_ms": 1714000004000u64,
+            })
+            .to_string(),
+        )?;
         let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
         let addr = server
             .local_url()?
@@ -2818,6 +2912,10 @@ mod tests {
             "response: {response}"
         );
         assert!(response.contains("\"requests\""), "response: {response}");
+        assert!(
+            response.contains("42-1714000004000-1"),
+            "response: {response}"
+        );
 
         handle.join().expect("server thread should join")?;
         fs::remove_dir_all(result.config.state_root)?;
@@ -2931,6 +3029,25 @@ mod tests {
     fn console_server_returns_request_detail_api_payload() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
+        let requests_dir = result.storage.artifacts_dir.join("requests");
+        fs::create_dir_all(&requests_dir)?;
+        fs::write(
+            requests_dir.join("1714000005000-77-1.json"),
+            serde_json::json!({
+                "event_id": "demo-request",
+                "pid": 77,
+                "target_display_name": "NodeApp",
+                "provider_hint": "anthropic",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.anthropic.com/v1/messages",
+                "body_text": "{\"model\":\"claude-3-7-sonnet\",\"messages\":[]}",
+                "body_size_bytes": 48,
+                "truncated": false,
+                "captured_at_ms": 1714000005000u64,
+            })
+            .to_string(),
+        )?;
         let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
         let addr = server
             .local_url()?
@@ -2947,6 +3064,10 @@ mod tests {
         );
         assert!(response.contains("\"request\""), "response: {response}");
         assert!(response.contains("demo-request"), "response: {response}");
+        assert!(
+            response.contains("claude-3-7-sonnet"),
+            "response: {response}"
+        );
 
         handle.join().expect("server thread should join")?;
         fs::remove_dir_all(result.config.state_root)?;
