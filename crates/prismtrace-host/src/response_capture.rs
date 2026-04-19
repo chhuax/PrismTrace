@@ -141,6 +141,7 @@ mod tests {
             pid: 123,
             app_name: "Example".into(),
             executable_path: PathBuf::from("/usr/local/bin/example"),
+            command_line: None,
             runtime_kind: RuntimeKind::Node,
         };
         let msg = IpcMessage::HttpResponseObserved {
@@ -187,6 +188,7 @@ mod tests {
             pid: 124,
             app_name: "Example".into(),
             executable_path: PathBuf::from("/usr/local/bin/example"),
+            command_line: None,
             runtime_kind: RuntimeKind::Node,
         };
         let msg = IpcMessage::HttpResponseObserved {
