@@ -14,7 +14,8 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[test]
-fn attach_to_running_node_cli_captures_request_and_response_and_writes_artifacts() -> io::Result<()> {
+fn attach_to_running_node_cli_captures_request_and_response_and_writes_artifacts() -> io::Result<()>
+{
     let workspace = TempWorkspace::new("node-cli-attach")?;
     let script_path = write_node_target_script(workspace.path())?;
     let node_bin = resolve_node_binary()?;

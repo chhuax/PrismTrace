@@ -171,7 +171,8 @@ mod tests {
                 .contains("[response] openai 200 POST /v1/responses 120ms")
         );
         assert!(event.artifact_path.is_file());
-        let artifact = fs::read_to_string(event.artifact_path).expect("artifact should be readable");
+        let artifact =
+            fs::read_to_string(event.artifact_path).expect("artifact should be readable");
         assert!(artifact.contains(r#""exchange_id":"ex-1""#));
 
         fs::remove_dir_all(root).expect("temp root cleanup should succeed");

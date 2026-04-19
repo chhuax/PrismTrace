@@ -2,11 +2,11 @@ use crate::ipc::{IpcEvent, IpcListener};
 use crate::response_capture;
 use prismtrace_core::{HttpHeader, IpcMessage, ProcessTarget};
 use prismtrace_storage::StorageLayout;
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::io::Write;
 use std::path::PathBuf;
-use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -302,17 +302,15 @@ pub fn consume_probe_events(
                 },
             )) => {
                 refresh_wait_deadline(&mut wait_deadline);
-                if let Some(event) =
-                    response_capture::capture_observed_response_with_hint(
-                        storage,
-                        target,
-                        message,
-                        sequence,
-                        provider_hints_by_exchange
-                            .get(exchange_id)
-                            .map(String::as_str),
-                    )?
-                {
+                if let Some(event) = response_capture::capture_observed_response_with_hint(
+                    storage,
+                    target,
+                    message,
+                    sequence,
+                    provider_hints_by_exchange
+                        .get(exchange_id)
+                        .map(String::as_str),
+                )? {
                     writeln!(output, "{}", event.summary)?;
                     sequence += 1;
                 }
