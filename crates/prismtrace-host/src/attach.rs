@@ -10,6 +10,23 @@ use crate::runtime::InstrumentationRuntime;
 
 pub const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(10);
 pub const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const PROCESS_PID_EXPRESSION: &str = r#"
+(() => {
+  if (typeof process !== "undefined" && process && process.pid) {
+    return process.pid;
+  }
+  if (typeof globalThis !== "undefined" && globalThis.process && globalThis.process.pid) {
+    return globalThis.process.pid;
+  }
+  try {
+    return require("process").pid;
+  } catch (_) {}
+  try {
+    return require("node:process").pid;
+  } catch (_) {}
+  return undefined;
+})()
+"#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendAttachOutcome {
@@ -561,7 +578,7 @@ mod tests {
             app_name: "yaml-language-server".into(),
             executable_path: PathBuf::from("/usr/local/bin/node"),
             command_line: Some(
-                "node /Users/huaxin/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio".into(),
+                "node /Users/test/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio".into(),
             ),
             runtime_kind: RuntimeKind::Node,
         };

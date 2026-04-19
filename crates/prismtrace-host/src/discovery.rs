@@ -63,8 +63,16 @@ fn parse_ps_line(line: &str) -> Option<ProcessSample> {
     let pid_end = trimmed.find(char::is_whitespace)?;
     let pid = trimmed[..pid_end].parse().ok()?;
     let rest = trimmed[pid_end..].trim_start();
+    if rest.is_empty() {
+        return None;
+    }
+
     let executable_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
     let executable_path = &rest[..executable_end];
+    if executable_path.is_empty() {
+        return None;
+    }
+
     let command_line = rest[executable_end..].trim_start();
 
     Some(ProcessSample {
@@ -135,7 +143,7 @@ mod tests {
     #[test]
     fn parse_ps_line_preserves_command_line_for_node_helpers() {
         let sample = parse_ps_line(
-            "  345 /usr/local/bin/node node /Users/huaxin/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio",
+            "  345 /usr/local/bin/node node /Users/test/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio",
         )
         .unwrap();
 
@@ -145,9 +153,14 @@ mod tests {
         assert_eq!(
             sample.command_line,
             Some(
-                "node /Users/huaxin/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio"
+                "node /Users/test/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio"
                     .into()
             )
         );
+    }
+
+    #[test]
+    fn parse_ps_line_returns_none_when_only_pid_is_present() {
+        assert!(parse_ps_line("  345").is_none());
     }
 }

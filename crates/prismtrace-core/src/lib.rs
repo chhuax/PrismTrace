@@ -50,12 +50,48 @@ pub struct ProcessSample {
 }
 
 impl ProcessSample {
+    fn first_script_argument<'a, I>(parts: &mut I) -> Option<&'a str>
+    where
+        I: Iterator<Item = &'a str>,
+    {
+        while let Some(part) = parts.next() {
+            if part == "--" {
+                return parts.next();
+            }
+
+            if matches!(
+                part,
+                "-r" | "--require" | "--loader" | "--import" | "-e" | "--eval" | "-p" | "--print"
+            ) {
+                let _ = parts.next();
+                continue;
+            }
+
+            if part.starts_with("--require=")
+                || part.starts_with("--loader=")
+                || part.starts_with("--import=")
+                || part.starts_with("--eval=")
+                || part.starts_with("--print=")
+            {
+                continue;
+            }
+
+            if part.starts_with('-') {
+                continue;
+            }
+
+            return Some(part);
+        }
+
+        None
+    }
+
     fn script_name_from_command_line(&self) -> Option<String> {
         let command_line = self.command_line.as_deref()?;
         let mut parts = command_line.split_whitespace();
         let _runtime = parts.next()?;
 
-        let script = parts.find(|part| !part.starts_with('-'))?;
+        let script = Self::first_script_argument(&mut parts)?;
         let script_name = std::path::Path::new(script)
             .file_name()
             .and_then(|name| name.to_str())
@@ -497,11 +533,23 @@ mod tests {
             process_name: "node".into(),
             executable_path: PathBuf::from("/usr/local/bin/node"),
             command_line: Some(
-                "node /Users/huaxin/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio".into(),
+                "node /Users/test/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio".into(),
             ),
         };
 
         assert_eq!(sample.normalized_app_name(), "yaml-language-server");
+    }
+
+    #[test]
+    fn process_sample_skips_common_node_option_value_pairs_when_finding_script_name() {
+        let sample = ProcessSample {
+            pid: 12,
+            process_name: "node".into(),
+            executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: Some("node -r ts-node/register /tmp/app.js".into()),
+        };
+
+        assert_eq!(sample.normalized_app_name(), "app");
     }
 
     #[test]

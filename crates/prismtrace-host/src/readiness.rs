@@ -146,7 +146,7 @@ mod tests {
             app_name: "yaml-language-server".into(),
             executable_path: PathBuf::from("/usr/local/bin/node"),
             command_line: Some(
-                "node /Users/huaxin/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio".into(),
+                "node /Users/test/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio".into(),
             ),
             runtime_kind: RuntimeKind::Node,
         };
