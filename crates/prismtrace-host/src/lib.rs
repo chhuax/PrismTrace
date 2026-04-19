@@ -1,4 +1,5 @@
 pub mod attach;
+pub mod console;
 pub mod discovery;
 pub mod ipc;
 pub mod probe_health;
@@ -364,6 +365,7 @@ mod tests {
         collect_readiness_snapshot, detach_report, startup_summary,
     };
     use crate::attach::{AttachController, ScriptedAttachBackend};
+    use crate::console::{collect_console_snapshot, console_startup_report};
     use crate::discovery::StaticProcessSampleSource;
     use prismtrace_core::{
         AttachFailureKind, AttachReadiness, AttachReadinessStatus, AttachSession,
@@ -423,6 +425,37 @@ mod tests {
         assert!(summary.contains("PrismTrace host skeleton"));
         assert!(summary.contains(DEFAULT_BIND_ADDR));
         assert!(summary.contains(result.storage.db_path.to_string_lossy().as_ref()));
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn collect_console_snapshot_exposes_local_console_url() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+
+        let snapshot = collect_console_snapshot(&result);
+
+        assert_eq!(snapshot.bind_addr, format!("http://{}", DEFAULT_BIND_ADDR));
+        assert!(snapshot.summary.contains("PrismTrace host skeleton"));
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn console_startup_report_mentions_browser_entrypoint() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let snapshot = collect_console_snapshot(&result);
+        let report = console_startup_report(&snapshot);
+
+        assert!(
+            report.contains("PrismTrace Local Console"),
+            "report: {report}"
+        );
+        assert!(report.contains("http://127.0.0.1:7799"), "report: {report}");
 
         fs::remove_dir_all(result.config.state_root)?;
         Ok(())

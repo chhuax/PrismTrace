@@ -2,6 +2,11 @@ fn main() -> std::io::Result<()> {
     let result = prismtrace_host::bootstrap(std::env::current_dir()?)?;
     let args: Vec<String> = std::env::args().skip(1).collect();
 
+    if args.iter().any(|arg| arg == "--console") {
+        let mut stdout = std::io::stdout().lock();
+        return prismtrace_host::console::run_console_server(&result, &mut stdout);
+    }
+
     if let Some(pid) = attach_pid_arg(&args)? {
         let mut stdout = std::io::stdout().lock();
         prismtrace_host::run_foreground_attach_session(
@@ -85,6 +90,13 @@ fn attach_pid_arg(args: &[String]) -> std::io::Result<Option<u32>> {
 #[cfg(test)]
 mod tests {
     use super::attach_pid_arg;
+
+    #[test]
+    fn console_flag_is_detected_without_conflicting_with_attach_pid_parsing() {
+        let args = vec!["--console".to_string()];
+
+        assert_eq!(attach_pid_arg(&args).expect("parse should succeed"), None);
+    }
 
     #[test]
     fn attach_pid_arg_returns_none_when_flag_is_missing() {

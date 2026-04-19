@@ -57,3 +57,20 @@ cargo run -p prismtrace-host -- --attach <pid>
 ```
 
 `--attach <pid>` currently performs a foreground attach session that can capture request and response artifacts for supported running Node CLI targets.
+
+## Local Console
+
+Start the local observability console with:
+
+```bash
+cargo run -p prismtrace-host -- --console
+```
+
+By default, PrismTrace serves the console at `http://127.0.0.1:7799`.
+
+The current bootstrap console provides:
+
+- target summaries
+- recent activity timeline
+- request summary list
+- basic request detail and observability health panels
