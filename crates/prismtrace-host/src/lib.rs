@@ -435,7 +435,7 @@ mod tests {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
 
-        let snapshot = collect_console_snapshot(&result);
+        let snapshot = collect_console_snapshot(&result, None);
 
         assert_eq!(snapshot.bind_addr, format!("http://{}", DEFAULT_BIND_ADDR));
         assert!(snapshot.summary.contains("PrismTrace host skeleton"));
@@ -448,7 +448,7 @@ mod tests {
     fn console_startup_report_mentions_browser_entrypoint() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
-        let snapshot = collect_console_snapshot(&result);
+        let snapshot = collect_console_snapshot(&result, None);
         let report = console_startup_report(&snapshot);
 
         assert!(

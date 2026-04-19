@@ -1,9 +1,9 @@
-use crate::BootstrapResult;
-use crate::discovery::{ProcessSampleSource, PsProcessSampleSource, discover_targets};
+use crate::discovery::{discover_targets, ProcessSampleSource, PsProcessSampleSource};
 use crate::probe_health::ProbeHealthStore;
+use crate::BootstrapResult;
 use prismtrace_core::{AttachSession, ProbeHealth, ProcessTarget};
 use prismtrace_storage::StorageLayout;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::fs;
 use std::io;
 use std::io::{Read, Write};
@@ -14,10 +14,17 @@ use std::path::{Path, PathBuf};
 pub struct ConsoleSnapshot {
     pub summary: String,
     pub bind_addr: String,
+    pub filter_context: Option<ConsoleFilterContext>,
     pub target_summaries: Vec<ConsoleTargetSummary>,
     pub activity_items: Vec<ConsoleActivityItem>,
     pub request_summaries: Vec<ConsoleRequestSummary>,
     pub request_details: Vec<ConsoleRequestDetail>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleFilterContext {
+    pub active_filters: Vec<String>,
+    pub is_filtered_view: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +34,149 @@ pub struct ConsoleTargetSummary {
     pub runtime_kind: String,
     pub attach_state: String,
     pub probe_state_summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleTargetFilterConfig {
+    terms: Vec<String>,
+}
+
+impl ConsoleTargetFilterConfig {
+    pub fn new(terms: Vec<String>) -> Self {
+        Self {
+            terms: terms
+                .into_iter()
+                .map(|term| term.trim().to_ascii_lowercase())
+                .filter(|term| !term.is_empty())
+                .collect(),
+        }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        !self.terms.is_empty()
+    }
+
+    pub fn matches_target(&self, target: &ProcessTarget) -> bool {
+        if !self.is_enabled() {
+            return true;
+        }
+
+        let display_name = target.display_name().to_ascii_lowercase();
+        let executable_path = target
+            .executable_path
+            .to_string_lossy()
+            .to_ascii_lowercase();
+        let command_identity = target
+            .command_line
+            .as_deref()
+            .and_then(command_line_identity)
+            .unwrap_or_default();
+
+        self.terms.iter().any(|term| {
+            display_name.contains(term)
+                || executable_path.contains(term)
+                || command_identity.contains(term)
+        })
+    }
+}
+
+fn command_line_identity(command_line: &str) -> Option<String> {
+    let mut parts = command_line.split_whitespace();
+    let _process = parts.next()?;
+    let command = loop {
+        let part = parts.next()?;
+
+        if matches!(part, "--target") {
+            let _ = parts.next();
+            continue;
+        }
+
+        if part.starts_with('-') {
+            continue;
+        }
+
+        break part;
+    };
+
+    let identity = std::path::Path::new(command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(command)
+        .trim_end_matches(".js")
+        .trim_end_matches(".mjs")
+        .trim_end_matches(".cjs")
+        .to_ascii_lowercase();
+
+    (!identity.is_empty()).then_some(identity)
+}
+
+fn console_filter_context(
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> Option<ConsoleFilterContext> {
+    filter
+        .filter(|filter| filter.is_enabled())
+        .map(|filter| ConsoleFilterContext {
+            active_filters: filter.terms.clone(),
+            is_filtered_view: true,
+        })
+}
+
+fn filter_request_summaries(
+    requests: &[ConsoleRequestSummary],
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> Vec<ConsoleRequestSummary> {
+    let Some(filter) = filter else {
+        return requests.to_vec();
+    };
+
+    if !filter.is_enabled() {
+        return requests.to_vec();
+    }
+
+    requests
+        .iter()
+        .filter(|request| {
+            let target = ProcessTarget {
+                pid: 0,
+                app_name: request.target_display_name.clone(),
+                executable_path: PathBuf::from(&request.target_display_name),
+                command_line: None,
+                runtime_kind: prismtrace_core::RuntimeKind::Unknown,
+            };
+
+            filter.matches_target(&target)
+        })
+        .cloned()
+        .collect()
+}
+
+fn filter_request_details(
+    details: &[ConsoleRequestDetail],
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> Vec<ConsoleRequestDetail> {
+    let Some(filter) = filter else {
+        return details.to_vec();
+    };
+
+    if !filter.is_enabled() {
+        return details.to_vec();
+    }
+
+    details
+        .iter()
+        .filter(|detail| {
+            let target = ProcessTarget {
+                pid: 0,
+                app_name: detail.target_display_name.clone(),
+                executable_path: PathBuf::from(&detail.target_display_name),
+                command_line: None,
+                runtime_kind: prismtrace_core::RuntimeKind::Unknown,
+            };
+
+            filter.matches_target(&target)
+        })
+        .cloned()
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,24 +279,41 @@ impl ConsoleServer {
     }
 }
 
-pub fn collect_console_snapshot(result: &BootstrapResult) -> ConsoleSnapshot {
-    let target_summaries =
-        collect_target_summaries(&PsProcessSampleSource, None, None).unwrap_or_else(|_| Vec::new());
+pub fn collect_console_snapshot(
+    result: &BootstrapResult,
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> ConsoleSnapshot {
+    let (_, unmatched_targets, target_summaries) =
+        collect_target_partition_and_summaries(&PsProcessSampleSource, filter, None, None)
+            .unwrap_or_else(|_| (Vec::new(), Vec::new(), Vec::new()));
+    let request_summaries = filter_request_summaries(
+        &load_request_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
+        filter,
+    );
+    let request_details = filter_request_details(
+        &load_request_details(&result.storage).unwrap_or_else(|_| Vec::new()),
+        filter,
+    );
 
     ConsoleSnapshot {
         summary: crate::startup_summary(result),
         bind_addr: format!("http://{}", result.config.bind_addr),
+        filter_context: console_filter_context(filter),
         target_summaries,
-        activity_items: collect_activity_items(ConsoleActivitySource {
-            attach_session: None,
-            attach_occurred_at_ms: None,
-            probe_health: None,
-            probe_occurred_at_ms: None,
-            recent_requests: &[],
-            known_errors: &[],
-        }),
-        request_summaries: load_request_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
-        request_details: load_request_details(&result.storage).unwrap_or_else(|_| Vec::new()),
+        activity_items: collect_activity_items_filtered(
+            ConsoleActivitySource {
+                attach_session: None,
+                attach_occurred_at_ms: None,
+                probe_health: None,
+                probe_occurred_at_ms: None,
+                recent_requests: &[],
+                known_errors: &[],
+            },
+            filter,
+            &unmatched_targets,
+        ),
+        request_summaries,
+        request_details,
     }
 }
 
@@ -160,40 +327,69 @@ open: {}",
 }
 
 pub fn start_console_server(result: &BootstrapResult) -> io::Result<ConsoleServer> {
-    start_console_server_on_bind_addr(result, &result.config.bind_addr)
+    start_console_server_with_target_filters(result, None)
 }
 
 pub fn run_console_server(result: &BootstrapResult, output: &mut impl Write) -> io::Result<()> {
-    let server = start_console_server(result)?;
+    run_console_server_with_target_filters(result, None, output)
+}
+
+pub fn run_console_server_with_target_filters(
+    result: &BootstrapResult,
+    target_filters: Option<&[String]>,
+    output: &mut impl Write,
+) -> io::Result<()> {
+    let server = start_console_server_with_target_filters(result, target_filters)?;
     writeln!(output, "{}", console_startup_report(server.snapshot()))?;
     server.serve_forever()
+}
+
+pub fn start_console_server_with_target_filters(
+    result: &BootstrapResult,
+    target_filters: Option<&[String]>,
+) -> io::Result<ConsoleServer> {
+    let filter = target_filters.map(|terms| ConsoleTargetFilterConfig::new(terms.to_vec()));
+    start_console_server_on_bind_addr(result, &result.config.bind_addr, filter.as_ref())
 }
 
 pub fn start_console_server_on_bind_addr(
     result: &BootstrapResult,
     bind_addr: &str,
+    filter: Option<&ConsoleTargetFilterConfig>,
 ) -> io::Result<ConsoleServer> {
     let listener = TcpListener::bind(bind_addr)?;
     let local_addr = listener.local_addr()?;
+    let (_, unmatched_targets, target_summaries) =
+        collect_target_partition_and_summaries(&PsProcessSampleSource, filter, None, None)
+            .unwrap_or_else(|_| (Vec::new(), Vec::new(), Vec::new()));
 
     Ok(ConsoleServer {
         listener,
         snapshot: ConsoleSnapshot {
             summary: crate::startup_summary(result),
             bind_addr: format!("http://{local_addr}"),
-            target_summaries: collect_target_summaries(&PsProcessSampleSource, None, None)
-                .unwrap_or_else(|_| Vec::new()),
-            activity_items: collect_activity_items(ConsoleActivitySource {
-                attach_session: None,
-                attach_occurred_at_ms: None,
-                probe_health: None,
-                probe_occurred_at_ms: None,
-                recent_requests: &[],
-                known_errors: &[],
-            }),
-            request_summaries: load_request_summaries(&result.storage)
-                .unwrap_or_else(|_| Vec::new()),
-            request_details: load_request_details(&result.storage).unwrap_or_else(|_| Vec::new()),
+            filter_context: console_filter_context(filter),
+            target_summaries,
+            activity_items: collect_activity_items_filtered(
+                ConsoleActivitySource {
+                    attach_session: None,
+                    attach_occurred_at_ms: None,
+                    probe_health: None,
+                    probe_occurred_at_ms: None,
+                    recent_requests: &[],
+                    known_errors: &[],
+                },
+                filter,
+                &unmatched_targets,
+            ),
+            request_summaries: filter_request_summaries(
+                &load_request_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
+                filter,
+            ),
+            request_details: filter_request_details(
+                &load_request_details(&result.storage).unwrap_or_else(|_| Vec::new()),
+                filter,
+            ),
         },
     })
 }
@@ -210,22 +406,36 @@ fn write_console_response(stream: &mut TcpStream, snapshot: &ConsoleSnapshot) ->
         Some("/api/targets") => (
             "HTTP/1.1 200 OK",
             "application/json; charset=utf-8",
-            render_targets_payload_from_summaries(&snapshot.target_summaries),
+            render_targets_payload_from_summaries(
+                &snapshot.target_summaries,
+                snapshot.filter_context.as_ref(),
+            ),
         ),
         Some("/api/activity") => (
             "HTTP/1.1 200 OK",
             "application/json; charset=utf-8",
-            render_activity_payload_from_items(&snapshot.activity_items),
+            render_activity_payload_from_items(
+                &snapshot.activity_items,
+                snapshot.filter_context.as_ref(),
+            ),
         ),
         Some("/api/requests") => (
             "HTTP/1.1 200 OK",
             "application/json; charset=utf-8",
-            render_requests_payload(&snapshot.request_summaries),
+            render_requests_payload(
+                &snapshot.request_summaries,
+                snapshot.filter_context.as_ref(),
+            ),
         ),
         Some("/api/health") => (
             "HTTP/1.1 200 OK",
             "application/json; charset=utf-8",
-            render_health_payload(&snapshot.target_summaries, &snapshot.activity_items),
+            render_health_payload(
+                &snapshot.target_summaries,
+                &snapshot.activity_items,
+                None,
+                snapshot.filter_context.as_ref(),
+            ),
         ),
         Some(path) if path.starts_with("/api/requests/") => (
             "HTTP/1.1 200 OK",
@@ -233,6 +443,7 @@ fn write_console_response(stream: &mut TcpStream, snapshot: &ConsoleSnapshot) ->
             render_request_detail_payload(
                 path.trim_start_matches("/api/requests/"),
                 &snapshot.request_details,
+                snapshot.filter_context.as_ref(),
             ),
         ),
         Some(_) => (
@@ -262,9 +473,15 @@ fn read_request_path(stream: &mut TcpStream) -> io::Result<Option<String>> {
 }
 
 fn render_console_homepage(snapshot: &ConsoleSnapshot) -> String {
-    let targets_html = render_targets_panel_items(&snapshot.target_summaries);
-    let activity_html = render_activity_panel_items(&snapshot.activity_items);
-    let requests_html = render_requests_panel_items(&snapshot.request_summaries);
+    let filter_context_html = render_filter_context_banner(snapshot.filter_context.as_ref());
+    let targets_html =
+        render_targets_panel_items(&snapshot.target_summaries, snapshot.filter_context.as_ref());
+    let activity_html =
+        render_activity_panel_items(&snapshot.activity_items, snapshot.filter_context.as_ref());
+    let requests_html = render_requests_panel_items(
+        &snapshot.request_summaries,
+        snapshot.filter_context.as_ref(),
+    );
     let request_detail_html = render_request_detail_panel(snapshot.request_details.first());
     let health_html = render_health_panel(&snapshot.target_summaries, &snapshot.activity_items);
     let script = render_console_homepage_script(snapshot.request_summaries.first());
@@ -471,6 +688,7 @@ fn render_console_homepage(snapshot: &ConsoleSnapshot) -> String {
             <p><code>{}</code></p>
           </div>
         </div>
+        {}
       </header>
       <main class=\"console-layout\">
         <section class=\"console-panel\" aria-labelledby=\"targets-heading\">
@@ -512,12 +730,36 @@ fn render_console_homepage(snapshot: &ConsoleSnapshot) -> String {
 </html>",
         snapshot.summary,
         snapshot.bind_addr,
+        filter_context_html,
         targets_html,
         activity_html,
         requests_html,
         request_detail_html,
         health_html,
         script
+    )
+}
+
+fn render_filter_context_banner(filter_context: Option<&ConsoleFilterContext>) -> String {
+    let Some(filter_context) = filter_context else {
+        return String::new();
+    };
+
+    let filters = filter_context
+        .active_filters
+        .iter()
+        .map(|filter| {
+            format!(
+                "<span class=\"console-pill\">{}</span>",
+                escape_html(filter)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    format!(
+        "<div class=\"console-entrypoint\"><p class=\"console-entrypoint-label\">Filtered monitor scope</p><div class=\"console-list-meta\">{}</div></div>",
+        filters
     )
 }
 
@@ -673,9 +915,15 @@ fn render_console_homepage_script(initial_request: Option<&ConsoleRequestSummary
     script
 }
 
-fn render_targets_panel_items(targets: &[ConsoleTargetSummary]) -> String {
+fn render_targets_panel_items(
+    targets: &[ConsoleTargetSummary],
+    filter_context: Option<&ConsoleFilterContext>,
+) -> String {
     if targets.is_empty() {
-        return render_console_empty_state("尚无可观测目标");
+        return render_console_empty_state(&filtered_empty_state_message(
+            filter_context,
+            "尚无可观测目标",
+        ));
     }
 
     let items = targets
@@ -696,9 +944,15 @@ fn render_targets_panel_items(targets: &[ConsoleTargetSummary]) -> String {
     format!("<div class=\"console-list\">{items}</div>")
 }
 
-fn render_activity_panel_items(items: &[ConsoleActivityItem]) -> String {
+fn render_activity_panel_items(
+    items: &[ConsoleActivityItem],
+    filter_context: Option<&ConsoleFilterContext>,
+) -> String {
     if items.is_empty() {
-        return render_console_empty_state("尚无观测活动");
+        return render_console_empty_state(&filtered_empty_state_message(
+            filter_context,
+            "尚无观测活动",
+        ));
     }
 
     let items = items
@@ -718,9 +972,15 @@ fn render_activity_panel_items(items: &[ConsoleActivityItem]) -> String {
     format!("<div class=\"console-list\">{items}</div>")
 }
 
-fn render_requests_panel_items(requests: &[ConsoleRequestSummary]) -> String {
+fn render_requests_panel_items(
+    requests: &[ConsoleRequestSummary],
+    filter_context: Option<&ConsoleFilterContext>,
+) -> String {
     if requests.is_empty() {
-        return render_console_empty_state("尚无请求记录");
+        return render_console_empty_state(&filtered_empty_state_message(
+            filter_context,
+            "尚无请求记录",
+        ));
     }
 
     let items = requests
@@ -747,6 +1007,21 @@ fn render_console_empty_state(text: &str) -> String {
         "<p class=\"muted console-placeholder\">{}</p>",
         escape_html(text)
     )
+}
+
+fn filtered_empty_state_message(
+    filter_context: Option<&ConsoleFilterContext>,
+    default: &str,
+) -> String {
+    match filter_context {
+        Some(filter_context) if filter_context.is_filtered_view => match default {
+            "尚无可观测目标" => "当前过滤条件下没有匹配目标".to_string(),
+            "尚无观测活动" => "当前过滤条件下没有匹配活动".to_string(),
+            "尚无请求记录" => "当前过滤条件下没有匹配请求".to_string(),
+            _ => default.to_string(),
+        },
+        _ => default.to_string(),
+    }
 }
 
 fn render_request_detail_panel(detail: Option<&ConsoleRequestDetail>) -> String {
@@ -817,13 +1092,38 @@ fn render_health_panel(
 fn render_health_payload(
     targets: &[ConsoleTargetSummary],
     activity_items: &[ConsoleActivityItem],
+    filter: Option<&ConsoleTargetFilterConfig>,
+    filter_context: Option<&ConsoleFilterContext>,
 ) -> String {
-    let probe_summary = targets
+    let filtered_targets = if let Some(filter) = filter {
+        if filter.is_enabled() {
+            targets
+                .iter()
+                .filter(|target| {
+                    let candidate = ProcessTarget {
+                        pid: target.pid,
+                        app_name: target.display_name.clone(),
+                        executable_path: PathBuf::from(&target.display_name),
+                        command_line: None,
+                        runtime_kind: prismtrace_core::RuntimeKind::Unknown,
+                    };
+                    filter.matches_target(&candidate)
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            targets.to_vec()
+        }
+    } else {
+        targets.to_vec()
+    };
+
+    let probe_summary = filtered_targets
         .iter()
         .find(|target| target.attach_state != "idle")
         .map(|target| target.probe_state_summary.clone())
         .or_else(|| {
-            targets
+            filtered_targets
                 .first()
                 .map(|target| target.probe_state_summary.clone())
         });
@@ -831,6 +1131,10 @@ fn render_health_payload(
     let errors = activity_items
         .iter()
         .filter(|item| item.activity_type == "error")
+        .filter(|item| match item.related_pid {
+            Some(pid) => filtered_targets.iter().any(|target| target.pid == pid),
+            None => true,
+        })
         .map(|item| {
             json!({
                 "title": item.title,
@@ -840,12 +1144,13 @@ fn render_health_payload(
         })
         .collect::<Vec<_>>();
 
-    json!({
+    let mut payload = json!({
         "probe_summary": probe_summary,
         "errors": errors,
         "empty_state": if probe_summary.is_none() && errors.is_empty() { Some("尚未发现 probe 健康或错误提示") } else { None::<&str> }
-    })
-    .to_string()
+    });
+    append_filter_context_fields(&mut payload, filter_context);
+    payload.to_string()
 }
 
 fn escape_html(value: &str) -> String {
@@ -872,7 +1177,10 @@ fn request_path_only(url: &str) -> &str {
         .unwrap_or("/")
 }
 
-fn render_targets_payload_from_summaries(targets: &[ConsoleTargetSummary]) -> String {
+fn render_targets_payload_from_summaries(
+    targets: &[ConsoleTargetSummary],
+    filter_context: Option<&ConsoleFilterContext>,
+) -> String {
     let targets = targets
         .iter()
         .map(|target| {
@@ -886,24 +1194,61 @@ fn render_targets_payload_from_summaries(targets: &[ConsoleTargetSummary]) -> St
         })
         .collect::<Vec<_>>();
 
-    json!({
+    let mut payload = json!({
         "targets": targets,
-        "empty_state": if targets.is_empty() { Some("尚无可观测目标") } else { None::<&str> }
-    })
-    .to_string()
+        "empty_state": if targets.is_empty() { Some(filtered_empty_state_message(filter_context, "尚无可观测目标")) } else { None::<String> }
+    });
+    append_filter_context_fields(&mut payload, filter_context);
+    payload.to_string()
 }
 
 pub fn collect_target_summaries(
     source: &impl ProcessSampleSource,
+    filter: Option<&ConsoleTargetFilterConfig>,
     active_session: Option<&AttachSession>,
     probe_health: Option<&ProbeHealth>,
 ) -> io::Result<Vec<ConsoleTargetSummary>> {
-    let discovered_targets = discover_targets(source)?;
+    let (_, _, summaries) =
+        collect_target_partition_and_summaries(source, filter, active_session, probe_health)?;
 
-    Ok(discovered_targets
+    Ok(summaries)
+}
+
+fn collect_target_partition_and_summaries(
+    source: &impl ProcessSampleSource,
+    filter: Option<&ConsoleTargetFilterConfig>,
+    active_session: Option<&AttachSession>,
+    probe_health: Option<&ProbeHealth>,
+) -> io::Result<(
+    Vec<ProcessTarget>,
+    Vec<ProcessTarget>,
+    Vec<ConsoleTargetSummary>,
+)> {
+    let discovered_targets = discover_targets(source)?;
+    let (matched_targets, unmatched_targets) = partition_targets(discovered_targets, filter);
+    let summaries = matched_targets
         .iter()
         .map(|target| summarize_target(target, active_session, probe_health))
-        .collect())
+        .collect();
+
+    Ok((matched_targets, unmatched_targets, summaries))
+}
+
+fn partition_targets(
+    discovered_targets: Vec<ProcessTarget>,
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> (Vec<ProcessTarget>, Vec<ProcessTarget>) {
+    let Some(filter) = filter else {
+        return (discovered_targets, Vec::new());
+    };
+
+    if !filter.is_enabled() {
+        return (discovered_targets, Vec::new());
+    }
+
+    discovered_targets
+        .into_iter()
+        .partition(|target| filter.matches_target(target))
 }
 
 fn summarize_target(
@@ -1029,7 +1374,38 @@ pub fn collect_activity_items(source: ConsoleActivitySource<'_>) -> Vec<ConsoleA
     items
 }
 
-fn render_activity_payload_from_items(items: &[ConsoleActivityItem]) -> String {
+fn collect_activity_items_filtered(
+    source: ConsoleActivitySource<'_>,
+    filter: Option<&ConsoleTargetFilterConfig>,
+    unmatched_targets: &[ProcessTarget],
+) -> Vec<ConsoleActivityItem> {
+    let items = collect_activity_items(source);
+    let Some(filter) = filter else {
+        return items;
+    };
+
+    if !filter.is_enabled() {
+        return items;
+    }
+
+    let unmatched_pids = unmatched_targets
+        .iter()
+        .map(|target| target.pid)
+        .collect::<Vec<_>>();
+
+    items
+        .into_iter()
+        .filter(|item| match item.related_pid {
+            Some(pid) => !unmatched_pids.contains(&pid),
+            None => true,
+        })
+        .collect()
+}
+
+fn render_activity_payload_from_items(
+    items: &[ConsoleActivityItem],
+    filter_context: Option<&ConsoleFilterContext>,
+) -> String {
     let activity = items
         .iter()
         .map(|item| {
@@ -1045,11 +1421,12 @@ fn render_activity_payload_from_items(items: &[ConsoleActivityItem]) -> String {
         })
         .collect::<Vec<_>>();
 
-    json!({
+    let mut payload = json!({
         "activity": activity,
-        "empty_state": if items.is_empty() { Some("尚无观测活动") } else { None::<&str> }
-    })
-    .to_string()
+        "empty_state": if items.is_empty() { Some(filtered_empty_state_message(filter_context, "尚无观测活动")) } else { None::<String> }
+    });
+    append_filter_context_fields(&mut payload, filter_context);
+    payload.to_string()
 }
 
 pub fn load_request_summaries(storage: &StorageLayout) -> io::Result<Vec<ConsoleRequestSummary>> {
@@ -1206,7 +1583,10 @@ fn extract_model_from_body_text(body_text: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn render_requests_payload(requests: &[ConsoleRequestSummary]) -> String {
+fn render_requests_payload(
+    requests: &[ConsoleRequestSummary],
+    filter_context: Option<&ConsoleFilterContext>,
+) -> String {
     let requests = requests
         .iter()
         .map(|request| {
@@ -1221,18 +1601,23 @@ fn render_requests_payload(requests: &[ConsoleRequestSummary]) -> String {
         })
         .collect::<Vec<_>>();
 
-    json!({
+    let mut payload = json!({
         "requests": requests,
-        "empty_state": if requests.is_empty() { Some("尚无请求记录") } else { None::<&str> }
-    })
-    .to_string()
+        "empty_state": if requests.is_empty() { Some(filtered_empty_state_message(filter_context, "尚无请求记录")) } else { None::<String> }
+    });
+    append_filter_context_fields(&mut payload, filter_context);
+    payload.to_string()
 }
 
-fn render_request_detail_payload(request_id: &str, details: &[ConsoleRequestDetail]) -> String {
+fn render_request_detail_payload(
+    request_id: &str,
+    details: &[ConsoleRequestDetail],
+    filter_context: Option<&ConsoleFilterContext>,
+) -> String {
     let detail = details
         .iter()
         .find(|detail| detail.request_id == request_id);
-    match detail {
+    let mut payload = match detail {
         Some(detail) => json!({
             "request": {
                 "request_id": detail.request_id,
@@ -1244,17 +1629,29 @@ fn render_request_detail_payload(request_id: &str, details: &[ConsoleRequestDeta
                 "request_summary": detail.request_summary,
                 "probe_context": detail.probe_context,
             }
-        })
-        .to_string(),
+        }),
         None => json!({
             "request": {
                 "request_id": request_id,
                 "status": "not_found",
                 "detail": "request detail is not available yet"
             }
-        })
-        .to_string(),
-    }
+        }),
+    };
+    append_filter_context_fields(&mut payload, filter_context);
+    payload.to_string()
+}
+
+fn append_filter_context_fields(
+    payload: &mut Value,
+    filter_context: Option<&ConsoleFilterContext>,
+) {
+    let Some(filter_context) = filter_context else {
+        return;
+    };
+
+    payload["active_filters"] = json!(filter_context.active_filters);
+    payload["is_filtered_view"] = json!(filter_context.is_filtered_view);
 }
 
 fn read_request_path_from_reader(reader: &mut impl Read) -> io::Result<Option<String>> {
@@ -1282,10 +1679,12 @@ fn read_request_path_from_reader(reader: &mut impl Read) -> io::Result<Option<St
 #[cfg(test)]
 mod tests {
     use super::{
-        ConsoleKnownErrorActivity, ConsoleRecentRequestActivity, ConsoleSnapshot,
-        collect_activity_items, collect_target_summaries, load_request_detail,
-        load_request_summaries, read_request_path_from_reader, render_activity_payload_from_items,
-        run_console_server, start_console_server_on_bind_addr, write_console_response,
+        collect_activity_items, collect_activity_items_filtered, collect_target_summaries,
+        filter_request_summaries, load_request_detail, load_request_summaries,
+        read_request_path_from_reader, render_activity_payload_from_items, run_console_server,
+        start_console_server_on_bind_addr, write_console_response, ConsoleActivityItem,
+        ConsoleActivitySource, ConsoleKnownErrorActivity, ConsoleRecentRequestActivity,
+        ConsoleRequestSummary, ConsoleSnapshot, ConsoleTargetFilterConfig, ConsoleTargetSummary,
     };
     use crate::bootstrap;
     use crate::discovery::StaticProcessSampleSource;
@@ -1298,8 +1697,386 @@ mod tests {
     use std::net::{TcpListener, TcpStream};
     use std::path::PathBuf;
     use std::process;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static UNIQUE_TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn console_target_filter_config_is_disabled_when_terms_are_empty() {
+        let filter = ConsoleTargetFilterConfig::new(Vec::new());
+
+        assert!(!filter.is_enabled());
+    }
+
+    #[test]
+    fn console_target_filter_config_matches_display_name_path_and_command_line() {
+        let filter = ConsoleTargetFilterConfig::new(vec!["codex".into()]);
+        let target = ProcessTarget {
+            pid: 42,
+            app_name: "Codex CLI".into(),
+            executable_path: PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex"),
+            command_line: Some("/Applications/Codex.app/Contents/MacOS/Codex --console".into()),
+            runtime_kind: RuntimeKind::Electron,
+        };
+
+        assert!(filter.matches_target(&target));
+    }
+
+    #[test]
+    fn console_target_filter_config_matches_when_any_term_hits() {
+        let filter = ConsoleTargetFilterConfig::new(vec!["opencode".into(), "codex".into()]);
+        let target = ProcessTarget {
+            pid: 7,
+            app_name: "yaml-language-server".into(),
+            executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: Some("node /Users/test/bin/opencode-server.js --stdio".into()),
+            runtime_kind: RuntimeKind::Node,
+        };
+
+        assert!(filter.matches_target(&target));
+    }
+
+    #[test]
+    fn console_target_filter_config_does_not_match_when_term_only_appears_in_console_flag_args() {
+        let filter = ConsoleTargetFilterConfig::new(vec!["definitely-no-match".into()]);
+        let target = ProcessTarget {
+            pid: 999,
+            app_name: "prismtrace-host".into(),
+            executable_path: PathBuf::from("/tmp/target/debug/prismtrace-host"),
+            command_line: Some(
+                "target/debug/prismtrace-host --console --target definitely-no-match".into(),
+            ),
+            runtime_kind: RuntimeKind::Unknown,
+        };
+
+        assert!(!filter.matches_target(&target));
+    }
+
+    #[test]
+    fn console_target_filter_config_rejects_non_matching_targets() {
+        let filter = ConsoleTargetFilterConfig::new(vec!["codex".into()]);
+        let target = ProcessTarget {
+            pid: 8,
+            app_name: "Claude Code".into(),
+            executable_path: PathBuf::from(
+                "/Applications/Claude Code.app/Contents/MacOS/Claude Code",
+            ),
+            command_line: Some("/Applications/Claude Code.app/Contents/MacOS/Claude Code".into()),
+            runtime_kind: RuntimeKind::Electron,
+        };
+
+        assert!(!filter.matches_target(&target));
+    }
+
+    #[test]
+    fn collect_target_summaries_filters_non_matching_targets() -> io::Result<()> {
+        let source = StaticProcessSampleSource::new(vec![
+            ProcessSample {
+                pid: 100,
+                process_name: "node".into(),
+                executable_path: PathBuf::from("/usr/local/bin/node"),
+                command_line: Some("node /tmp/opencode.js".into()),
+            },
+            ProcessSample {
+                pid: 200,
+                process_name: "node".into(),
+                executable_path: PathBuf::from("/usr/local/bin/node"),
+                command_line: Some("node /tmp/claude.js".into()),
+            },
+        ]);
+        let filter = ConsoleTargetFilterConfig::new(vec!["opencode".into()]);
+
+        let summaries = collect_target_summaries(&source, Some(&filter), None, None)?;
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].pid, 100);
+        Ok(())
+    }
+
+    #[test]
+    fn collect_activity_items_filters_items_by_matching_pid() {
+        let filter = ConsoleTargetFilterConfig::new(vec!["opencode".into()]);
+        let matched_target = ProcessTarget {
+            pid: 100,
+            app_name: "opencode".into(),
+            executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: Some("node /tmp/opencode.js".into()),
+            runtime_kind: RuntimeKind::Node,
+        };
+        let unmatched_target = ProcessTarget {
+            pid: 200,
+            app_name: "claude".into(),
+            executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: Some("node /tmp/claude.js".into()),
+            runtime_kind: RuntimeKind::Node,
+        };
+        let attach_session = AttachSession {
+            target: matched_target,
+            state: AttachSessionState::Attached,
+            detail: "probe handshake completed".into(),
+            bootstrap: None,
+            failure: None,
+        };
+
+        let items = collect_activity_items_filtered(
+            ConsoleActivitySource {
+                attach_session: Some(&attach_session),
+                attach_occurred_at_ms: Some(10),
+                probe_health: None,
+                probe_occurred_at_ms: None,
+                recent_requests: &[
+                    ConsoleRecentRequestActivity {
+                        request_id: "req-match".into(),
+                        captured_at_ms: 20,
+                        title: "matched".into(),
+                        subtitle: "matched".into(),
+                        related_pid: Some(100),
+                    },
+                    ConsoleRecentRequestActivity {
+                        request_id: "req-unmatch".into(),
+                        captured_at_ms: 30,
+                        title: "unmatched".into(),
+                        subtitle: "unmatched".into(),
+                        related_pid: Some(200),
+                    },
+                ],
+                known_errors: &[
+                    ConsoleKnownErrorActivity {
+                        activity_id: "error-match".into(),
+                        occurred_at_ms: 40,
+                        title: "matched error".into(),
+                        subtitle: "matched error".into(),
+                        related_pid: Some(100),
+                    },
+                    ConsoleKnownErrorActivity {
+                        activity_id: "error-unmatch".into(),
+                        occurred_at_ms: 50,
+                        title: "unmatched error".into(),
+                        subtitle: "unmatched error".into(),
+                        related_pid: Some(200),
+                    },
+                ],
+            },
+            Some(&filter),
+            &[unmatched_target],
+        );
+
+        assert_eq!(items.len(), 3);
+        assert!(items.iter().all(|item| item.related_pid != Some(200)));
+    }
+
+    #[test]
+    fn filter_request_summaries_keeps_only_matching_target_display_names() {
+        let filter = ConsoleTargetFilterConfig::new(vec!["opencode".into()]);
+        let requests = vec![
+            ConsoleRequestSummary {
+                request_id: "req-match".into(),
+                captured_at_ms: 1,
+                provider: "openai".into(),
+                model: None,
+                target_display_name: "opencode".into(),
+                summary_text: "matched".into(),
+            },
+            ConsoleRequestSummary {
+                request_id: "req-unmatch".into(),
+                captured_at_ms: 2,
+                provider: "anthropic".into(),
+                model: None,
+                target_display_name: "claude".into(),
+                summary_text: "unmatched".into(),
+            },
+        ];
+
+        let filtered = filter_request_summaries(&requests, Some(&filter));
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].request_id, "req-match");
+    }
+
+    #[test]
+    fn render_health_payload_filters_errors_by_matching_pid() {
+        let filter = ConsoleTargetFilterConfig::new(vec!["opencode".into()]);
+        let targets = vec![ConsoleTargetSummary {
+            pid: 100,
+            display_name: "opencode".into(),
+            runtime_kind: "node".into(),
+            attach_state: "attached".into(),
+            probe_state_summary: "probe: healthy".into(),
+        }];
+        let activity = vec![
+            ConsoleActivityItem {
+                activity_id: "error-match".into(),
+                activity_type: "error".into(),
+                occurred_at_ms: 10,
+                title: "matched error".into(),
+                subtitle: "matched error".into(),
+                related_pid: Some(100),
+                related_request_id: None,
+            },
+            ConsoleActivityItem {
+                activity_id: "error-unmatch".into(),
+                activity_type: "error".into(),
+                occurred_at_ms: 20,
+                title: "unmatched error".into(),
+                subtitle: "unmatched error".into(),
+                related_pid: Some(200),
+                related_request_id: None,
+            },
+        ];
+
+        let payload = super::render_health_payload(&targets, &activity, Some(&filter), None);
+
+        assert!(payload.contains("matched error"), "payload: {payload}");
+        assert!(!payload.contains("unmatched error"), "payload: {payload}");
+    }
+
+    #[test]
+    fn render_console_homepage_shows_filter_context_when_filters_are_active() {
+        let homepage = super::render_console_homepage(&ConsoleSnapshot {
+            summary: "PrismTrace host skeleton".into(),
+            bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: Some(super::ConsoleFilterContext {
+                active_filters: vec!["opencode".into(), "codex".into()],
+                is_filtered_view: true,
+            }),
+            target_summaries: vec![],
+            activity_items: vec![],
+            request_summaries: vec![],
+            request_details: vec![],
+        });
+
+        assert!(
+            homepage.contains("Filtered monitor scope"),
+            "homepage: {homepage}"
+        );
+        assert!(homepage.contains("opencode"), "homepage: {homepage}");
+        assert!(homepage.contains("codex"), "homepage: {homepage}");
+    }
+
+    #[test]
+    fn render_console_homepage_hides_filter_context_when_unfiltered() {
+        let homepage = super::render_console_homepage(&ConsoleSnapshot {
+            summary: "PrismTrace host skeleton".into(),
+            bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
+            target_summaries: vec![],
+            activity_items: vec![],
+            request_summaries: vec![],
+            request_details: vec![],
+        });
+
+        assert!(
+            !homepage.contains("Filtered monitor scope"),
+            "homepage: {homepage}"
+        );
+    }
+
+    #[test]
+    fn render_targets_payload_includes_filter_context_when_filters_are_active() {
+        let payload = super::render_targets_payload_from_summaries(
+            &[],
+            Some(&super::ConsoleFilterContext {
+                active_filters: vec!["opencode".into()],
+                is_filtered_view: true,
+            }),
+        );
+
+        assert!(
+            payload.contains("\"is_filtered_view\":true"),
+            "payload: {payload}"
+        );
+        assert!(
+            payload.contains("\"active_filters\":[\"opencode\"]"),
+            "payload: {payload}"
+        );
+    }
+
+    #[test]
+    fn render_targets_payload_omits_filter_context_when_unfiltered() {
+        let payload = super::render_targets_payload_from_summaries(&[], None);
+
+        assert!(!payload.contains("active_filters"), "payload: {payload}");
+        assert!(!payload.contains("is_filtered_view"), "payload: {payload}");
+    }
+
+    #[test]
+    fn render_targets_payload_uses_filtered_no_match_empty_state_when_context_is_active() {
+        let payload = super::render_targets_payload_from_summaries(
+            &[],
+            Some(&super::ConsoleFilterContext {
+                active_filters: vec!["opencode".into()],
+                is_filtered_view: true,
+            }),
+        );
+
+        assert!(
+            payload.contains("当前过滤条件下没有匹配目标"),
+            "payload: {payload}"
+        );
+    }
+
+    #[test]
+    fn render_activity_payload_uses_filtered_no_match_empty_state_when_context_is_active() {
+        let payload = super::render_activity_payload_from_items(
+            &[],
+            Some(&super::ConsoleFilterContext {
+                active_filters: vec!["opencode".into()],
+                is_filtered_view: true,
+            }),
+        );
+
+        assert!(
+            payload.contains("当前过滤条件下没有匹配活动"),
+            "payload: {payload}"
+        );
+    }
+
+    #[test]
+    fn render_requests_payload_uses_filtered_no_match_empty_state_when_context_is_active() {
+        let payload = super::render_requests_payload(
+            &[],
+            Some(&super::ConsoleFilterContext {
+                active_filters: vec!["opencode".into()],
+                is_filtered_view: true,
+            }),
+        );
+
+        assert!(
+            payload.contains("当前过滤条件下没有匹配请求"),
+            "payload: {payload}"
+        );
+    }
+
+    #[test]
+    fn render_console_homepage_uses_filtered_no_match_empty_states_when_context_is_active() {
+        let homepage = super::render_console_homepage(&ConsoleSnapshot {
+            summary: "PrismTrace host skeleton".into(),
+            bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: Some(super::ConsoleFilterContext {
+                active_filters: vec!["opencode".into()],
+                is_filtered_view: true,
+            }),
+            target_summaries: vec![],
+            activity_items: vec![],
+            request_summaries: vec![],
+            request_details: vec![],
+        });
+
+        assert!(
+            homepage.contains("当前过滤条件下没有匹配目标"),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("当前过滤条件下没有匹配活动"),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("当前过滤条件下没有匹配请求"),
+            "homepage: {homepage}"
+        );
+    }
 
     #[test]
     fn start_console_server_returns_addr_in_use_when_bind_fails() -> io::Result<()> {
@@ -1308,7 +2085,7 @@ mod tests {
         let occupied = TcpListener::bind("127.0.0.1:0")?;
         let addr = occupied.local_addr()?;
 
-        let error = start_console_server_on_bind_addr(&result, &addr.to_string())
+        let error = start_console_server_on_bind_addr(&result, &addr.to_string(), None)
             .expect_err("occupied port should fail");
 
         assert_eq!(error.kind(), io::ErrorKind::AddrInUse);
@@ -1322,7 +2099,7 @@ mod tests {
     fn console_server_serves_homepage_over_http() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
-        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0")?;
+        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
         let addr = server
             .local_url()?
             .trim_start_matches("http://")
@@ -1362,6 +2139,7 @@ mod tests {
         let homepage = super::render_console_homepage(&ConsoleSnapshot {
             summary: "PrismTrace host skeleton".into(),
             bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
             target_summaries: vec![],
             activity_items: vec![],
             request_summaries: vec![],
@@ -1410,6 +2188,7 @@ mod tests {
         let homepage = super::render_console_homepage(&ConsoleSnapshot {
             summary: "PrismTrace host skeleton".into(),
             bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
             target_summaries: vec![super::ConsoleTargetSummary {
                 pid: 701,
                 display_name: "Codex".into(),
@@ -1459,7 +2238,7 @@ mod tests {
 
     #[test]
     fn render_targets_payload_includes_empty_state_when_no_targets() {
-        let payload = super::render_targets_payload_from_summaries(&[]);
+        let payload = super::render_targets_payload_from_summaries(&[], None);
 
         assert!(payload.contains("\"targets\":[]"), "payload: {payload}");
         assert!(
@@ -1473,6 +2252,7 @@ mod tests {
         let homepage = super::render_console_homepage(&ConsoleSnapshot {
             summary: "PrismTrace host skeleton".into(),
             bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
             target_summaries: vec![],
             activity_items: vec![],
             request_summaries: vec![super::ConsoleRequestSummary {
@@ -1519,6 +2299,7 @@ mod tests {
         let homepage = super::render_console_homepage(&ConsoleSnapshot {
             summary: "PrismTrace host skeleton\n[alive] probe: attached (installed: 2, failed: 1)\nprobe heartbeat timed out".into(),
             bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
             target_summaries: vec![super::ConsoleTargetSummary {
                 pid: 701,
                 display_name: "Codex".into(),
@@ -1549,7 +2330,7 @@ mod tests {
 
     #[test]
     fn render_request_detail_payload_marks_missing_detail_with_status() {
-        let payload = super::render_request_detail_payload("missing-request", &[]);
+        let payload = super::render_request_detail_payload("missing-request", &[], None);
 
         assert!(
             payload.contains("\"status\":\"not_found\""),
@@ -1580,6 +2361,8 @@ mod tests {
                 related_pid: Some(701),
                 related_request_id: None,
             }],
+            None,
+            None,
         );
 
         assert!(
@@ -1601,6 +2384,7 @@ mod tests {
         let snapshot = ConsoleSnapshot {
             summary: "summary".into(),
             bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
             target_summaries: vec![super::ConsoleTargetSummary {
                 pid: 777,
                 display_name: "node".into(),
@@ -1652,7 +2436,7 @@ mod tests {
     fn console_server_returns_not_found_for_unknown_path() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
-        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0")?;
+        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
         let addr = server
             .local_url()?
             .trim_start_matches("http://")
@@ -1683,6 +2467,7 @@ mod tests {
         let snapshot = ConsoleSnapshot {
             summary: "summary".into(),
             bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
             target_summaries: vec![],
             activity_items: vec![],
             request_summaries: vec![],
@@ -1713,11 +2498,53 @@ mod tests {
     }
 
     #[test]
-    fn write_console_response_renders_target_summary_fields_from_controlled_snapshot()
-    -> io::Result<()> {
+    fn console_server_returns_filtered_targets_api_empty_state_and_context() -> io::Result<()> {
         let snapshot = ConsoleSnapshot {
             summary: "summary".into(),
             bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: Some(super::ConsoleFilterContext {
+                active_filters: vec!["opencode".into()],
+                is_filtered_view: true,
+            }),
+            target_summaries: vec![],
+            activity_items: vec![],
+            request_summaries: vec![],
+            request_details: vec![],
+        };
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let addr = listener.local_addr()?;
+
+        let handle = thread::spawn(move || -> io::Result<()> {
+            let (mut server_stream, _) = listener.accept()?;
+            write_console_response(&mut server_stream, &snapshot)
+        });
+
+        let response = send_get_request(&addr.to_string(), "/api/targets")?;
+
+        assert!(
+            response.contains("\"active_filters\":[\"opencode\"]"),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"is_filtered_view\":true"),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("当前过滤条件下没有匹配目标"),
+            "response: {response}"
+        );
+
+        handle.join().expect("server thread should join")?;
+        Ok(())
+    }
+
+    #[test]
+    fn write_console_response_renders_target_summary_fields_from_controlled_snapshot(
+    ) -> io::Result<()> {
+        let snapshot = ConsoleSnapshot {
+            summary: "summary".into(),
+            bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
             target_summaries: vec![super::ConsoleTargetSummary {
                 pid: 777,
                 display_name: "node".into(),
@@ -1763,11 +2590,13 @@ mod tests {
                 pid: 701,
                 process_name: "node".into(),
                 executable_path: PathBuf::from("/usr/local/bin/node"),
+                command_line: None,
             },
             ProcessSample {
                 pid: 702,
                 process_name: "Electron".into(),
                 executable_path: PathBuf::from("/Applications/TestApp.app/Contents/MacOS/TestApp"),
+                command_line: None,
             },
         ]);
         let active_session = AttachSession {
@@ -1775,6 +2604,7 @@ mod tests {
                 pid: 701,
                 app_name: "node".into(),
                 executable_path: PathBuf::from("/usr/local/bin/node"),
+                command_line: None,
                 runtime_kind: RuntimeKind::Node,
             },
             state: AttachSessionState::Attached,
@@ -1789,7 +2619,7 @@ mod tests {
         };
 
         let summaries =
-            collect_target_summaries(&source, Some(&active_session), Some(&probe_health))?;
+            collect_target_summaries(&source, None, Some(&active_session), Some(&probe_health))?;
 
         assert_eq!(summaries.len(), 2);
         assert_eq!(summaries[0].pid, 701);
@@ -1802,18 +2632,20 @@ mod tests {
     }
 
     #[test]
-    fn collect_target_summaries_uses_no_health_data_for_active_target_without_probe_snapshot()
-    -> io::Result<()> {
+    fn collect_target_summaries_uses_no_health_data_for_active_target_without_probe_snapshot(
+    ) -> io::Result<()> {
         let source = StaticProcessSampleSource::new(vec![ProcessSample {
             pid: 703,
             process_name: "node".into(),
             executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: None,
         }]);
         let active_session = AttachSession {
             target: ProcessTarget {
                 pid: 703,
                 app_name: "node".into(),
                 executable_path: PathBuf::from("/usr/local/bin/node"),
+                command_line: None,
                 runtime_kind: RuntimeKind::Node,
             },
             state: AttachSessionState::Attached,
@@ -1822,7 +2654,7 @@ mod tests {
             failure: None,
         };
 
-        let summaries = collect_target_summaries(&source, Some(&active_session), None)?;
+        let summaries = collect_target_summaries(&source, None, Some(&active_session), None)?;
 
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].attach_state, "attached");
@@ -1843,7 +2675,7 @@ mod tests {
 
         assert!(items.is_empty());
 
-        let payload = render_activity_payload_from_items(&items);
+        let payload = render_activity_payload_from_items(&items, None);
         assert!(payload.contains("\"activity\":[]"), "payload: {payload}");
         assert!(payload.contains("尚无观测活动"), "payload: {payload}");
     }
@@ -1855,6 +2687,7 @@ mod tests {
                 pid: 801,
                 app_name: "node".into(),
                 executable_path: PathBuf::from("/usr/local/bin/node"),
+                command_line: None,
                 runtime_kind: RuntimeKind::Node,
             },
             state: AttachSessionState::Attached,
@@ -1903,6 +2736,7 @@ mod tests {
         let snapshot = ConsoleSnapshot {
             summary: "summary".into(),
             bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
             target_summaries: vec![],
             activity_items: vec![super::ConsoleActivityItem {
                 activity_id: "probe-1".into(),
@@ -1943,7 +2777,7 @@ mod tests {
     fn console_server_returns_activity_api_payload() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
-        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0")?;
+        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
         let addr = server
             .local_url()?
             .trim_start_matches("http://")
@@ -1968,7 +2802,7 @@ mod tests {
     fn console_server_returns_requests_api_payload() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
-        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0")?;
+        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
         let addr = server
             .local_url()?
             .trim_start_matches("http://")
@@ -1993,7 +2827,7 @@ mod tests {
     fn console_server_returns_favicon_without_not_found() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
-        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0")?;
+        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
         let addr = server
             .local_url()?
             .trim_start_matches("http://")
@@ -2096,7 +2930,7 @@ mod tests {
     fn console_server_returns_request_detail_api_payload() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
-        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0")?;
+        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
         let addr = server
             .local_url()?
             .trim_start_matches("http://")
@@ -2123,6 +2957,7 @@ mod tests {
         let snapshot = ConsoleSnapshot {
             summary: "summary".into(),
             bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
             target_summaries: vec![],
             activity_items: vec![],
             request_summaries: vec![],
@@ -2200,11 +3035,13 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
             .as_nanos();
+        let sequence = UNIQUE_TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
 
         std::env::temp_dir().join(format!(
-            "prismtrace-console-test-{}-{}",
+            "prismtrace-console-test-{}-{}-{}",
             process::id(),
-            nanos
+            nanos,
+            sequence
         ))
     }
 }
