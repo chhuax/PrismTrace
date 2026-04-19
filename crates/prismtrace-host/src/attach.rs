@@ -171,7 +171,7 @@ impl<R: InstrumentationRuntime> AttachBackend for LiveAttachBackend<R> {
                 IpcEvent::HeartbeatTimeout { .. } => {
                     return Err(AttachFailure {
                         kind: AttachFailureKind::HandshakeFailed,
-                        reason: "bootstrap timeout".into(),
+                        reason: bootstrap_timeout_reason(target),
                     });
                 }
                 IpcEvent::Message(_) => {
@@ -276,6 +276,14 @@ impl<R: InstrumentationRuntime> AttachBackend for LiveAttachBackend<R> {
 
         Ok(format!("[detached] pid {}", session.target.pid))
     }
+}
+
+fn bootstrap_timeout_reason(target: &ProcessTarget) -> String {
+    format!(
+        "bootstrap timeout while waiting for probe report from {} (pid {}); target may be an auxiliary helper rather than the app's model-facing runtime",
+        target.display_name(),
+        target.pid
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -524,6 +532,7 @@ mod tests {
                 pid,
                 app_name: format!("Codex-{pid}"),
                 executable_path: PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex"),
+                command_line: None,
                 runtime_kind: RuntimeKind::Electron,
             },
             status: AttachReadinessStatus::Supported,
@@ -537,11 +546,31 @@ mod tests {
                 pid,
                 app_name: format!("Unknown-{pid}"),
                 executable_path: PathBuf::from("/usr/bin/python3"),
+                command_line: None,
                 runtime_kind: RuntimeKind::Unknown,
             },
             status: AttachReadinessStatus::Unknown,
             reason: "runtime classification is not strong enough to recommend attach yet".into(),
         }
+    }
+
+    #[test]
+    fn bootstrap_timeout_reason_mentions_auxiliary_helper_processes() {
+        let target = ProcessTarget {
+            pid: 32848,
+            app_name: "yaml-language-server".into(),
+            executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: Some(
+                "node /Users/huaxin/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio".into(),
+            ),
+            runtime_kind: RuntimeKind::Node,
+        };
+
+        let reason = super::bootstrap_timeout_reason(&target);
+
+        assert!(reason.contains("bootstrap timeout"));
+        assert!(reason.contains("yaml-language-server"));
+        assert!(reason.contains("auxiliary"));
     }
 
     fn bootstrap_report_line() -> String {

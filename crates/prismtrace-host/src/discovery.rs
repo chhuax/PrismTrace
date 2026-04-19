@@ -28,7 +28,9 @@ pub struct PsProcessSampleSource;
 
 impl ProcessSampleSource for PsProcessSampleSource {
     fn collect_samples(&self) -> io::Result<Vec<ProcessSample>> {
-        let output = Command::new("ps").args(["-axo", "pid=,comm="]).output()?;
+        let output = Command::new("ps")
+            .args(["-axo", "pid=,comm=,args="])
+            .output()?;
 
         if !output.status.success() {
             return Err(io::Error::other("ps command failed"));
@@ -58,9 +60,12 @@ fn parse_ps_line(line: &str) -> Option<ProcessSample> {
         return None;
     }
 
-    let mut parts = trimmed.split_whitespace();
-    let pid = parts.next()?.parse().ok()?;
-    let executable_path = parts.next()?;
+    let pid_end = trimmed.find(char::is_whitespace)?;
+    let pid = trimmed[..pid_end].parse().ok()?;
+    let rest = trimmed[pid_end..].trim_start();
+    let executable_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let executable_path = &rest[..executable_end];
+    let command_line = rest[executable_end..].trim_start();
 
     Some(ProcessSample {
         pid,
@@ -70,6 +75,7 @@ fn parse_ps_line(line: &str) -> Option<ProcessSample> {
             .unwrap_or(executable_path)
             .to_string(),
         executable_path: executable_path.into(),
+        command_line: (!command_line.is_empty()).then(|| command_line.to_string()),
     })
 }
 
@@ -86,6 +92,7 @@ mod tests {
             pid: 200,
             process_name: "node".into(),
             executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: None,
         }]);
 
         let targets = discover_targets(&source)?;
@@ -102,6 +109,7 @@ mod tests {
             pid: 201,
             process_name: "python3".into(),
             executable_path: PathBuf::from("/usr/bin/python3"),
+            command_line: None,
         }]);
 
         let targets = discover_targets(&source)?;
@@ -120,6 +128,26 @@ mod tests {
         assert_eq!(
             sample.executable_path,
             PathBuf::from("/Applications/Electron.app/Contents/MacOS/Electron")
+        );
+        assert_eq!(sample.command_line, None);
+    }
+
+    #[test]
+    fn parse_ps_line_preserves_command_line_for_node_helpers() {
+        let sample = parse_ps_line(
+            "  345 /usr/local/bin/node node /Users/huaxin/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio",
+        )
+        .unwrap();
+
+        assert_eq!(sample.pid, 345);
+        assert_eq!(sample.process_name, "node");
+        assert_eq!(sample.executable_path, PathBuf::from("/usr/local/bin/node"));
+        assert_eq!(
+            sample.command_line,
+            Some(
+                "node /Users/huaxin/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio"
+                    .into()
+            )
         );
     }
 }

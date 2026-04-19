@@ -37,6 +37,7 @@ fn attach_to_running_node_cli_captures_request_and_response_and_writes_artifacts
         pid: target_pid,
         process_name: "node".into(),
         executable_path: node_bin,
+        command_line: None,
     }]);
 
     let mut output = Vec::new();

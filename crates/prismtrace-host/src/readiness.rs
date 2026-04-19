@@ -19,6 +19,12 @@ fn classify_target(target: &ProcessTarget) -> (AttachReadinessStatus, String) {
         .executable_path
         .to_string_lossy()
         .to_ascii_lowercase();
+    let app_name = target.app_name.to_ascii_lowercase();
+    let command_line = target
+        .command_line
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
 
     if path.starts_with("/system/")
         || path.starts_with("/usr/libexec/")
@@ -32,6 +38,16 @@ fn classify_target(target: &ProcessTarget) -> (AttachReadinessStatus, String) {
     }
 
     match target.runtime_kind {
+        RuntimeKind::Node
+            if app_name.contains("language-server")
+                || command_line.contains("language-server")
+                || command_line.contains("--stdio") =>
+        {
+            (
+                AttachReadinessStatus::Unknown,
+                "node helper process looks like an auxiliary stdio or language-server target, not the app's model-facing runtime".into(),
+            )
+        }
         RuntimeKind::Node => (
             AttachReadinessStatus::Supported,
             "node runtime target looks suitable for attach readiness checks".into(),
@@ -59,6 +75,7 @@ mod tests {
             pid: 401,
             app_name: "node".into(),
             executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: None,
             runtime_kind: RuntimeKind::Node,
         };
 
@@ -74,6 +91,7 @@ mod tests {
             pid: 402,
             app_name: "launchd".into(),
             executable_path: PathBuf::from("/sbin/launchd"),
+            command_line: None,
             runtime_kind: RuntimeKind::Unknown,
         };
 
@@ -88,6 +106,7 @@ mod tests {
             pid: 403,
             app_name: "Codex".into(),
             executable_path: PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex"),
+            command_line: None,
             runtime_kind: RuntimeKind::Unknown,
         };
 
@@ -103,12 +122,14 @@ mod tests {
                 pid: 404,
                 app_name: "node".into(),
                 executable_path: PathBuf::from("/usr/local/bin/node"),
+                command_line: None,
                 runtime_kind: RuntimeKind::Node,
             },
             ProcessTarget {
                 pid: 405,
                 app_name: "python3".into(),
                 executable_path: PathBuf::from("/usr/bin/python3"),
+                command_line: None,
                 runtime_kind: RuntimeKind::Unknown,
             },
         ];
@@ -116,5 +137,23 @@ mod tests {
         let readiness_results = evaluate_targets(&targets);
 
         assert_eq!(readiness_results.len(), 2);
+    }
+
+    #[test]
+    fn evaluate_target_marks_language_server_helpers_as_unknown() {
+        let target = ProcessTarget {
+            pid: 406,
+            app_name: "yaml-language-server".into(),
+            executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: Some(
+                "node /Users/huaxin/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio".into(),
+            ),
+            runtime_kind: RuntimeKind::Node,
+        };
+
+        let readiness = evaluate_target(&target);
+
+        assert_eq!(readiness.status, AttachReadinessStatus::Unknown);
+        assert!(readiness.reason.contains("helper"));
     }
 }
