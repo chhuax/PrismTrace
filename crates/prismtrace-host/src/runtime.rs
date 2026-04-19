@@ -824,15 +824,35 @@ fn connect_websocket(
 }
 
 fn extract_eval_number(response: &Value, context: &str) -> Result<u64, InstrumentationError> {
-    response
+    let result = response
         .get("result")
         .and_then(|result| result.get("result"))
-        .and_then(|result| result.get("value"))
-        .and_then(Value::as_u64)
         .ok_or_else(|| InstrumentationError {
             kind: InstrumentationErrorKind::InjectionFailed,
-            message: format!("invalid numeric evaluation result for {context}"),
-        })
+            message: format!("missing evaluation result payload for {context}: {response}"),
+        })?;
+
+    if let Some(number) = result.get("value").and_then(Value::as_u64) {
+        return Ok(number);
+    }
+
+    if let Some(description) = result.get("description").and_then(Value::as_str)
+        && let Ok(number) = description.parse::<u64>()
+    {
+        return Ok(number);
+    }
+
+    if let Some(raw) = result.get("unserializableValue").and_then(Value::as_str) {
+        let normalized = raw.trim_end_matches('n');
+        if let Ok(number) = normalized.parse::<u64>() {
+            return Ok(number);
+        }
+    }
+
+    Err(InstrumentationError {
+        kind: InstrumentationErrorKind::InjectionFailed,
+        message: format!("invalid numeric evaluation result for {context}: {result}"),
+    })
 }
 
 fn extract_eval_bool(response: &Value, context: &str) -> Result<bool, InstrumentationError> {
@@ -1035,6 +1055,7 @@ mod tests {
         parse_listener_ports, parse_websocket_debugger_url, pick_debugger_url_from_candidates,
         remove_active_control_if_matches,
     };
+    use serde_json::json;
     use std::io::BufRead;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, OnceLock, mpsc};
@@ -1218,6 +1239,24 @@ node    42424 huaxin   23u  IPv4 0x75a73a76      0t0  TCP 127.0.0.1:9229 (LISTEN
         assert_eq!(
             parse_websocket_debugger_url(payload),
             Some("ws://127.0.0.1:9229/abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_eval_number_accepts_description_when_value_is_missing() {
+        let response = json!({
+            "id": 2,
+            "result": {
+                "result": {
+                    "type": "number",
+                    "description": "59171"
+                }
+            }
+        });
+
+        assert_eq!(
+            super::extract_eval_number(&response, "process.pid verification").unwrap(),
+            59171
         );
     }
 
