@@ -57,3 +57,29 @@ cargo run -p prismtrace-host -- --attach <pid>
 ```
 
 `--attach <pid>` 当前会进入前台 attach 会话，并对受支持的运行中 Node CLI 目标捕获 request 与 response artifacts。
+
+## 本地控制台
+
+使用下面的命令启动本地可观测性控制台：
+
+```bash
+cargo run -p prismtrace-host -- --console
+```
+
+如果只想看特定目标，可以重复传入 `--target`：
+
+```bash
+cargo run -p prismtrace-host -- --console --target opencode
+cargo run -p prismtrace-host -- --console --target opencode --target codex
+```
+
+当传入 `--target` 后，首页和 `/api/*` payload 会保持一致的过滤视图；如果当前没有命中任何目标，控制台仍会正常打开，并显示带过滤上下文的空态说明，而不会回退到全局进程列表。
+
+当前默认入口地址是 `http://127.0.0.1:7799`。
+
+当前 bootstrap 阶段的控制台提供：
+
+- target 摘要列表
+- 最近活动时间线
+- request 摘要列表
+- 基础 request 详情与 observability health 面板

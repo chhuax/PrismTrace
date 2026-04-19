@@ -124,7 +124,7 @@ impl InstrumentationRuntime for ScriptedInstrumentationRuntime {
 /// Production instrumentation runtime for Node / Electron processes.
 const INSPECTOR_WAKEUP_SIGNAL: &str = "USR1";
 const INSPECTOR_IPC_PREFIX: &str = "__prismtraceIpc__";
-const INSPECTOR_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
+const INSPECTOR_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 const INSPECTOR_DISCOVERY_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const CDP_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const WORKER_POLL_TIMEOUT: Duration = Duration::from_millis(100);
