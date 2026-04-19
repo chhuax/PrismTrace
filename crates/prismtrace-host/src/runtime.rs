@@ -120,7 +120,7 @@ impl InstrumentationRuntime for ScriptedInstrumentationRuntime {
 }
 
 /// Production instrumentation runtime for Node / Electron processes.
-const INSPECTOR_WAKEUP_SIGNAL: i32 = libc::SIGUSR1;
+const INSPECTOR_WAKEUP_SIGNAL: &str = "USR1";
 const INSPECTOR_IPC_PREFIX: &str = "__prismtraceIpc__";
 const INSPECTOR_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
 const INSPECTOR_DISCOVERY_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -469,21 +469,64 @@ fn evaluate_expression(
     Ok(response)
 }
 
+fn classify_signal_command_error(stderr: &str) -> InstrumentationErrorKind {
+    let stderr_lower = stderr.to_lowercase();
+    if stderr_lower.contains("no such process") {
+        InstrumentationErrorKind::ProcessNotFound
+    } else if stderr_lower.contains("operation not permitted")
+        || stderr_lower.contains("permission denied")
+    {
+        InstrumentationErrorKind::PermissionDenied
+    } else {
+        InstrumentationErrorKind::InjectionFailed
+    }
+}
+
+fn build_unexpected_lsof_error(
+    pid: u32,
+    stderr: String,
+    status_code: Option<i32>,
+) -> InstrumentationError {
+    let status = status_code
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "terminated by signal".to_string());
+    let stderr_detail = if stderr.is_empty() {
+        "<empty stderr>".to_string()
+    } else {
+        stderr
+    };
+
+    InstrumentationError {
+        kind: InstrumentationErrorKind::InjectionFailed,
+        message: format!(
+            "lsof failed while probing inspector for pid {pid} (exit status: {status}): {stderr_detail}"
+        ),
+    }
+}
+
 fn activate_node_inspector(pid: u32) -> Result<(), InstrumentationError> {
-    let result = unsafe { libc::kill(pid as i32, INSPECTOR_WAKEUP_SIGNAL) };
-    if result == 0 {
+    let output = Command::new("kill")
+        .args(["-s", INSPECTOR_WAKEUP_SIGNAL, &pid.to_string()])
+        .output()
+        .map_err(|error| InstrumentationError {
+            kind: InstrumentationErrorKind::InjectionFailed,
+            message: format!("failed to invoke kill for pid {pid}: {error}"),
+        })?;
+
+    if output.status.success() {
         return Ok(());
     }
 
-    let os_error = std::io::Error::last_os_error();
-    let kind = match os_error.raw_os_error() {
-        Some(libc::ESRCH) => InstrumentationErrorKind::ProcessNotFound,
-        Some(libc::EPERM) => InstrumentationErrorKind::PermissionDenied,
-        _ => InstrumentationErrorKind::InjectionFailed,
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = stderr.trim();
+    let detail = if stderr.is_empty() {
+        "kill command failed"
+    } else {
+        stderr
     };
     Err(InstrumentationError {
-        kind,
-        message: format!("failed to send SIGUSR1 to pid {pid}: {os_error}"),
+        kind: classify_signal_command_error(stderr),
+        message: format!("failed to send SIGUSR1 to pid {pid}: {detail}"),
     })
 }
 
@@ -558,11 +601,11 @@ fn query_listener_ports(pid: u32) -> Result<Vec<u16>, InstrumentationError> {
         });
     }
 
-    if stderr.is_empty() {
-        return Ok(vec![]);
-    }
-
-    Ok(vec![])
+    Err(build_unexpected_lsof_error(
+        pid,
+        stderr,
+        output.status.code(),
+    ))
 }
 
 fn parse_websocket_debugger_url(payload: &str) -> Option<String> {
@@ -954,8 +997,8 @@ mod tests {
     use super::{
         InstrumentationError, InstrumentationErrorKind, InstrumentationRuntime,
         NodeInstrumentationRuntime, ScriptedInstrumentationRuntime, WorkerCommand, WorkerControl,
-        active_controls, parse_listener_ports, parse_websocket_debugger_url,
-        pick_debugger_url_from_candidates,
+        active_controls, build_unexpected_lsof_error, classify_signal_command_error,
+        parse_listener_ports, parse_websocket_debugger_url, pick_debugger_url_from_candidates,
     };
     use std::io::BufRead;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -1106,6 +1149,26 @@ node    42424 huaxin   23u  IPv4 0x75a73a76      0t0  TCP 127.0.0.1:9229 (LISTEN
     }
 
     #[test]
+    fn classify_signal_command_error_maps_common_kill_failures() {
+        assert_eq!(
+            classify_signal_command_error("kill: 123: No such process"),
+            InstrumentationErrorKind::ProcessNotFound
+        );
+        assert_eq!(
+            classify_signal_command_error("kill: 123: Operation not permitted"),
+            InstrumentationErrorKind::PermissionDenied
+        );
+        assert_eq!(
+            classify_signal_command_error("kill: 123: Permission denied"),
+            InstrumentationErrorKind::PermissionDenied
+        );
+        assert_eq!(
+            classify_signal_command_error("kill: 123: unexpected failure"),
+            InstrumentationErrorKind::InjectionFailed
+        );
+    }
+
+    #[test]
     fn parse_websocket_debugger_url_extracts_ws_url_from_json_list() {
         let payload = r#"[
   {
@@ -1158,6 +1221,22 @@ node    42424 huaxin   23u  IPv4 0x75a73a76      0t0  TCP 127.0.0.1:9229 (LISTEN
         .expect("selection should succeed");
 
         assert_eq!(selected, Some("ws://127.0.0.1:9229/uuid".to_string()));
+    }
+
+    #[test]
+    fn build_unexpected_lsof_error_includes_status_and_stderr() {
+        let err = build_unexpected_lsof_error(42424, "boom".into(), Some(1));
+        assert_eq!(err.kind, InstrumentationErrorKind::InjectionFailed);
+        assert!(
+            err.message.contains("exit status: 1"),
+            "message should include exit status: {}",
+            err.message
+        );
+        assert!(
+            err.message.contains("boom"),
+            "message should include stderr detail: {}",
+            err.message
+        );
     }
 
     #[test]

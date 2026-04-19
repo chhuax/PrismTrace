@@ -210,7 +210,7 @@ pub fn consume_probe_events(
     // the underlying bridge reader wakes on a coarser timeout cadence.
     let worker_timeout_slack = Duration::from_millis(300);
     let wait_poll_step = Duration::from_millis(100);
-    let wait_deadline = Instant::now() + timeout.saturating_add(worker_timeout_slack);
+    let mut wait_deadline = Instant::now() + timeout.saturating_add(worker_timeout_slack);
     let shutdown = listener.shutdown_handle();
     let (tx, rx) = mpsc::channel();
 
@@ -255,6 +255,9 @@ pub fn consume_probe_events(
             .take()
             .and_then(|join_handle| join_handle.join().ok())
     };
+    let refresh_wait_deadline = |deadline: &mut Instant| {
+        *deadline = Instant::now() + timeout.saturating_add(worker_timeout_slack);
+    };
 
     loop {
         let now = Instant::now();
@@ -277,6 +280,7 @@ pub fn consume_probe_events(
 
         match rx.recv_timeout(recv_window) {
             Ok(IpcEvent::Message(message @ IpcMessage::HttpRequestObserved { .. })) => {
+                refresh_wait_deadline(&mut wait_deadline);
                 if let Some(event) = capture_observed_request(storage, target, &message, sequence)?
                 {
                     writeln!(output, "{}", event.summary)?;
@@ -305,7 +309,9 @@ pub fn consume_probe_events(
                     listener,
                 });
             }
-            Ok(IpcEvent::Message(_)) => {}
+            Ok(IpcEvent::Message(_)) => {
+                refresh_wait_deadline(&mut wait_deadline);
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let listener = cleanup_worker(&mut worker, false);
@@ -657,6 +663,59 @@ mod tests {
         fs::remove_dir_all(root).expect("temp root cleanup should succeed");
     }
 
+    #[test]
+    fn consume_probe_events_refreshes_fallback_deadline_after_each_message() {
+        let root = temp_root("deadline-refresh");
+        let storage = StorageLayout::new(&root);
+        storage.initialize().expect("storage should initialize");
+        let target = sample_target();
+        let mut output = Vec::new();
+        let listener = crate::ipc::IpcListener::new(
+            Box::new(ScriptedLineReader::new(vec![
+                (
+                    Duration::from_millis(90),
+                    IpcMessage::Heartbeat { timestamp_ms: 1 }.to_json_line(),
+                ),
+                (
+                    Duration::from_millis(90),
+                    IpcMessage::Heartbeat { timestamp_ms: 2 }.to_json_line(),
+                ),
+                (
+                    Duration::from_millis(90),
+                    IpcMessage::Heartbeat { timestamp_ms: 3 }.to_json_line(),
+                ),
+                (
+                    Duration::from_millis(90),
+                    IpcMessage::Heartbeat { timestamp_ms: 4 }.to_json_line(),
+                ),
+                (
+                    Duration::from_millis(90),
+                    IpcMessage::DetachAck { timestamp_ms: 5 }.to_json_line(),
+                ),
+            ])),
+            Duration::from_millis(100),
+        );
+
+        let started = Instant::now();
+        let outcome = consume_probe_events(&storage, &target, listener, &mut output)
+            .expect("loop should finish after detach ack");
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed >= Duration::from_millis(430),
+            "session should outlive the original fixed fallback deadline, elapsed={elapsed:?}"
+        );
+        assert_eq!(outcome.exit, ProbeConsumeExit::DetachAck);
+        assert!(
+            !String::from_utf8(output)
+                .expect("stdout should be utf8")
+                .contains("[probe-timeout]"),
+            "healthy heartbeats should not trip fallback timeout"
+        );
+
+        fs::remove_dir_all(root).expect("temp root cleanup should succeed");
+    }
+
     fn temp_root(label: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -803,5 +862,60 @@ mod tests {
         }
 
         fn consume(&mut self, _amt: usize) {}
+    }
+
+    struct ScriptedLineReader {
+        steps: Vec<(Duration, Vec<u8>)>,
+        next_step: usize,
+        current: Vec<u8>,
+        position: usize,
+    }
+
+    impl ScriptedLineReader {
+        fn new(steps: Vec<(Duration, String)>) -> Self {
+            Self {
+                steps: steps
+                    .into_iter()
+                    .map(|(delay, line)| (delay, line.into_bytes()))
+                    .collect(),
+                next_step: 0,
+                current: Vec::new(),
+                position: 0,
+            }
+        }
+    }
+
+    impl Read for ScriptedLineReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let available = self.fill_buf()?;
+            let amount = available.len().min(buf.len());
+            buf[..amount].copy_from_slice(&available[..amount]);
+            self.consume(amount);
+            Ok(amount)
+        }
+    }
+
+    impl BufRead for ScriptedLineReader {
+        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            loop {
+                if self.position < self.current.len() {
+                    return Ok(&self.current[self.position..]);
+                }
+
+                if self.next_step >= self.steps.len() {
+                    return Ok(&[]);
+                }
+
+                let (delay, bytes) = &self.steps[self.next_step];
+                thread::sleep(*delay);
+                self.current = bytes.clone();
+                self.position = 0;
+                self.next_step += 1;
+            }
+        }
+
+        fn consume(&mut self, amount: usize) {
+            self.position = self.position.saturating_add(amount);
+        }
     }
 }
