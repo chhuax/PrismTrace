@@ -226,13 +226,10 @@ pub fn run_foreground_attach_session<R: InstrumentationRuntime>(
     writeln!(output, "{}", attached_session.summary())?;
 
     let listener = controller.take_listener().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "ipc listener is unavailable after successful attach for pid {}",
-                attached_session.target.pid
-            ),
-        )
+        io::Error::other(format!(
+            "ipc listener is unavailable after successful attach for pid {}",
+            attached_session.target.pid
+        ))
     })?;
 
     let consume_outcome = request_capture::consume_probe_events(

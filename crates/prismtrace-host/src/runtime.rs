@@ -203,7 +203,7 @@ struct InspectorBridgeWriter {
 }
 
 impl InspectorBridge {
-    fn new() -> Result<(InspectorBridgeWriter, Box<dyn BufRead + Send>), InstrumentationError> {
+    fn create() -> Result<(InspectorBridgeWriter, Box<dyn BufRead + Send>), InstrumentationError> {
         let (reader_side, writer_side) = UnixStream::pair().map_err(|e| InstrumentationError {
             kind: InstrumentationErrorKind::InjectionFailed,
             message: format!("failed to create inspector bridge: {e}"),
@@ -271,7 +271,7 @@ impl InspectorSession {
             "params": params,
         });
         self.socket
-            .send(Message::Text(payload.to_string().into()))
+            .send(Message::Text(payload.to_string()))
             .map_err(|e| InstrumentationError {
                 kind,
                 message: format!("failed to send CDP request {method}: {e}"),
@@ -841,7 +841,7 @@ impl InstrumentationRuntime for NodeInstrumentationRuntime {
 
         let websocket_debugger_url = discover_websocket_debugger_url(pid)?;
 
-        let (bridge_writer, reader) = InspectorBridge::new()?;
+        let (bridge_writer, reader) = InspectorBridge::create()?;
         let socket = connect_websocket(
             &websocket_debugger_url,
             InstrumentationErrorKind::InjectionFailed,
@@ -1125,7 +1125,8 @@ node    42424 huaxin   23u  IPv4 0x75a73a76      0t0  TCP 127.0.0.1:9229 (LISTEN
 
     #[test]
     fn inspector_bridge_new_returns_reader_with_complete_lines() {
-        let (writer, mut reader) = super::InspectorBridge::new().expect("bridge should initialize");
+        let (writer, mut reader) =
+            super::InspectorBridge::create().expect("bridge should initialize");
         writer
             .write_line(r#"{"type":"heartbeat","timestamp_ms":1}"#)
             .expect("line write should succeed");

@@ -237,11 +237,10 @@ pub fn consume_probe_events(
     let cleanup_worker = |worker: &mut Option<thread::JoinHandle<IpcListener>>,
                           request_shutdown: bool|
      -> Option<IpcListener> {
-        if request_shutdown {
-            if let Some(handle) = shutdown.as_ref() {
-                handle.shutdown();
-            }
+        if request_shutdown && let Some(handle) = shutdown.as_ref() {
+            handle.shutdown();
         }
+
         let can_join = match worker.as_ref() {
             None => false,
             Some(join_handle) => {
@@ -251,6 +250,7 @@ pub fn consume_probe_events(
         if !can_join {
             return None;
         }
+
         worker
             .take()
             .and_then(|join_handle| join_handle.join().ok())
