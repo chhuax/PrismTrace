@@ -29,7 +29,7 @@ fn attach_to_running_node_cli_captures_request_and_response_and_writes_artifacts
         .stderr(Stdio::null())
         .spawn()?;
     let mut child = ChildGuard::new(child);
-    thread::sleep(Duration::from_millis(150));
+    wait_for_child_startup(&mut child, Duration::from_secs(1))?;
 
     let target_pid = child.pid();
     let bootstrap_result = bootstrap(workspace.path())?;
@@ -269,6 +269,27 @@ impl ChildGuard {
         }
         Ok(None)
     }
+
+    fn try_status(&mut self) -> io::Result<Option<ExitStatus>> {
+        self.child
+            .as_mut()
+            .expect("child should be available")
+            .try_wait()
+    }
+}
+
+fn wait_for_child_startup(child: &mut ChildGuard, timeout: Duration) -> io::Result<()> {
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if let Some(status) = child.try_status()? {
+            return Err(io::Error::other(format!(
+                "node child exited before attach startup wait completed: {status}"
+            )));
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    Ok(())
 }
 
 impl Drop for ChildGuard {
