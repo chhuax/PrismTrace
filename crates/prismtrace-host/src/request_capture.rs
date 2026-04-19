@@ -43,6 +43,8 @@ pub(crate) fn is_sensitive_header(name: &str) -> bool {
     name.eq_ignore_ascii_case("authorization")
         || name.eq_ignore_ascii_case("x-api-key")
         || name.eq_ignore_ascii_case("proxy-authorization")
+        || name.eq_ignore_ascii_case("cookie")
+        || name.eq_ignore_ascii_case("set-cookie")
 }
 
 pub(crate) fn sanitized_headers(headers: &[HttpHeader]) -> Vec<HttpHeader> {
@@ -311,6 +313,7 @@ pub fn consume_probe_events(
                         .get(exchange_id)
                         .map(String::as_str),
                 )? {
+                    provider_hints_by_exchange.remove(exchange_id);
                     writeln!(output, "{}", event.summary)?;
                     sequence += 1;
                 }
@@ -604,6 +607,80 @@ mod tests {
         let text = String::from_utf8(output).expect("stdout should be utf8");
         assert!(text.contains("[captured] openai POST /v1/responses"));
         assert_eq!(outcome.exit, ProbeConsumeExit::DetachAck);
+        fs::remove_dir_all(root).expect("temp root cleanup should succeed");
+    }
+
+    #[test]
+    fn consume_probe_events_reuses_request_provider_hint_once_for_matching_response() {
+        let root = temp_root("response-hint");
+        let storage = StorageLayout::new(&root);
+        storage.initialize().expect("storage should initialize");
+        let target = sample_target();
+        let mut output = Vec::new();
+        let reader = Box::new(Cursor::new(
+            format!(
+                "{}{}{}{}",
+                IpcMessage::HttpRequestObserved {
+                    exchange_id: "ex-hint".into(),
+                    hook_name: "fetch".into(),
+                    method: "POST".into(),
+                    url: "https://example.invalid/v1/fake-llm".into(),
+                    headers: vec![HttpHeader {
+                        name: "authorization".into(),
+                        value: "Bearer test".into(),
+                    }],
+                    body_text: Some(
+                        r#"{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}"#
+                            .into()
+                    ),
+                    body_truncated: false,
+                    timestamp_ms: 10,
+                }
+                .to_json_line(),
+                IpcMessage::HttpResponseObserved {
+                    exchange_id: "ex-hint".into(),
+                    hook_name: "fetch".into(),
+                    method: "POST".into(),
+                    url: "https://example.invalid/v1/fake-llm".into(),
+                    status_code: 200,
+                    headers: vec![],
+                    body_text: None,
+                    body_truncated: false,
+                    started_at_ms: 11,
+                    completed_at_ms: 12,
+                }
+                .to_json_line(),
+                IpcMessage::HttpResponseObserved {
+                    exchange_id: "ex-hint".into(),
+                    hook_name: "fetch".into(),
+                    method: "POST".into(),
+                    url: "https://example.invalid/v1/fake-llm".into(),
+                    status_code: 200,
+                    headers: vec![],
+                    body_text: None,
+                    body_truncated: false,
+                    started_at_ms: 13,
+                    completed_at_ms: 14,
+                }
+                .to_json_line(),
+                IpcMessage::DetachAck { timestamp_ms: 15 }.to_json_line(),
+            )
+            .into_bytes(),
+        ));
+        let listener = crate::ipc::IpcListener::new(reader, Duration::from_secs(15));
+
+        let outcome = consume_probe_events(&storage, &target, listener, &mut output)
+            .expect("loop should succeed");
+
+        let text = String::from_utf8(output).expect("stdout should be utf8");
+        assert!(text.contains("[captured] generic-llm POST /v1/fake-llm"));
+        assert_eq!(
+            text.matches("[response] generic-llm 200 POST /v1/fake-llm")
+                .count(),
+            1
+        );
+        assert_eq!(outcome.exit, ProbeConsumeExit::DetachAck);
+
         fs::remove_dir_all(root).expect("temp root cleanup should succeed");
     }
 

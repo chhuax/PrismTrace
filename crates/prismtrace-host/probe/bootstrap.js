@@ -122,7 +122,7 @@
       headers: observed.headers,
       body_text: observed.bodyText,
       body_truncated: observed.bodyTruncated,
-      timestamp_ms: observed.timestampMs || Date.now(),
+      timestamp_ms: observed.timestampMs == null ? Date.now() : observed.timestampMs,
     });
   }
 

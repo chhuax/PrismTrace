@@ -124,7 +124,7 @@ pub fn capture_observed_response_with_hint(
 
 #[cfg(test)]
 mod tests {
-    use super::capture_observed_response;
+    use super::{capture_observed_response, capture_observed_response_with_hint};
     use prismtrace_core::{HttpHeader, IpcMessage, ProcessTarget, RuntimeKind};
     use prismtrace_storage::StorageLayout;
     use std::fs;
@@ -174,6 +174,52 @@ mod tests {
         let artifact =
             fs::read_to_string(event.artifact_path).expect("artifact should be readable");
         assert!(artifact.contains(r#""exchange_id":"ex-1""#));
+
+        fs::remove_dir_all(root).expect("temp root cleanup should succeed");
+    }
+
+    #[test]
+    fn capture_observed_response_redacts_cookie_headers() {
+        let root = temp_root("cookie-response");
+        let storage = StorageLayout::new(&root);
+        storage.initialize().expect("storage should initialize");
+        let target = ProcessTarget {
+            pid: 124,
+            app_name: "Example".into(),
+            executable_path: PathBuf::from("/usr/local/bin/example"),
+            runtime_kind: RuntimeKind::Node,
+        };
+        let msg = IpcMessage::HttpResponseObserved {
+            exchange_id: "ex-cookie".into(),
+            hook_name: "fetch".into(),
+            method: "POST".into(),
+            url: "https://example.invalid/v1/fake-llm".into(),
+            status_code: 200,
+            headers: vec![
+                HttpHeader {
+                    name: "set-cookie".into(),
+                    value: "session=secret".into(),
+                },
+                HttpHeader {
+                    name: "content-type".into(),
+                    value: "application/json".into(),
+                },
+            ],
+            body_text: None,
+            body_truncated: false,
+            started_at_ms: 10,
+            completed_at_ms: 20,
+        };
+
+        let event =
+            capture_observed_response_with_hint(&storage, &target, &msg, 1, Some("generic-llm"))
+                .expect("capture should succeed")
+                .expect("should capture response");
+        let artifact =
+            fs::read_to_string(event.artifact_path).expect("artifact should be readable");
+
+        assert!(!artifact.contains("session=secret"));
+        assert!(artifact.contains("[redacted]"));
 
         fs::remove_dir_all(root).expect("temp root cleanup should succeed");
     }

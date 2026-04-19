@@ -224,6 +224,51 @@ test('fetch hook emits matching request and response events with same exchange i
   }
 });
 
+test('fetch hook preserves an explicit zero timestamp for observed requests', async function () {
+  const writes = [];
+  const originalWrite = process.stdout.write;
+  process.stdout.write = function (chunk) {
+    writes.push(String(chunk));
+    return true;
+  };
+
+  const originalNow = Date.now;
+  Date.now = function () {
+    return 0;
+  };
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function fakeFetch() {
+    return new Response('{"ok":true}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  const { installHooks, dispose } = freshModule();
+
+  try {
+    installHooks(['fetch']);
+
+    await globalThis.fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"model":"gpt-test","input":"hi"}',
+    });
+
+    const requestEvent = writes.find((line) => line.includes('"type":"http_request_observed"'));
+    assert.ok(requestEvent, 'expected request event');
+
+    const requestJson = JSON.parse(requestEvent);
+    assert.equal(requestJson.timestamp_ms, 0);
+  } finally {
+    process.stdout.write = originalWrite;
+    Date.now = originalNow;
+    globalThis.fetch = originalFetch;
+    dispose();
+  }
+});
+
 test('http hook ignores non-text request bodies without throwing', function () {
   const writes = [];
   const originalWrite = process.stdout.write;
