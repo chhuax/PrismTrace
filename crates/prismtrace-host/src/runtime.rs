@@ -870,6 +870,41 @@ fn extract_eval_number(response: &Value, context: &str) -> Result<u64, Instrumen
     })
 }
 
+fn should_retry_process_pid_resolution(response: &Value) -> bool {
+    response
+        .get("result")
+        .and_then(|result| result.get("result"))
+        .and_then(|result| result.get("type"))
+        .and_then(Value::as_str)
+        == Some("undefined")
+}
+
+fn resolve_process_pid_with_retry<F>(
+    mut evaluate: F,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> Result<u64, InstrumentationError>
+where
+    F: FnMut() -> Result<Value, InstrumentationError>,
+{
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        let response = evaluate()?;
+        match extract_eval_number(&response, "process.pid verification") {
+            Ok(pid) => return Ok(pid),
+            Err(error) if should_retry_process_pid_resolution(&response) => {
+                if Instant::now() >= deadline {
+                    return Err(error);
+                }
+            }
+            Err(error) => return Err(error),
+        }
+
+        thread::sleep(poll_interval);
+    }
+}
+
 fn extract_eval_bool(response: &Value, context: &str) -> Result<bool, InstrumentationError> {
     response
         .get("result")
@@ -969,14 +1004,19 @@ impl InstrumentationRuntime for NodeInstrumentationRuntime {
             "Runtime.enable",
         )?;
 
-        let pid_response = evaluate_expression(
-            &mut session,
-            "process.pid",
+        let actual_pid = resolve_process_pid_with_retry(
+            || {
+                evaluate_expression(
+                    &mut session,
+                    "process.pid",
+                    CDP_REQUEST_TIMEOUT,
+                    InstrumentationErrorKind::InjectionFailed,
+                    "process.pid verification",
+                )
+            },
             CDP_REQUEST_TIMEOUT,
-            InstrumentationErrorKind::InjectionFailed,
-            "process.pid verification",
-        )?;
-        let actual_pid = extract_eval_number(&pid_response, "process.pid verification")? as u32;
+            WORKER_POLL_TIMEOUT,
+        )? as u32;
         if actual_pid != pid {
             return Err(InstrumentationError {
                 kind: InstrumentationErrorKind::RuntimeIncompatible,
@@ -1075,6 +1115,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, OnceLock, mpsc};
     use std::thread;
+    use std::time::Duration;
 
     fn control_test_guard() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1273,6 +1314,47 @@ node    42424 huaxin   23u  IPv4 0x75a73a76      0t0  TCP 127.0.0.1:9229 (LISTEN
             super::extract_eval_number(&response, "process.pid verification").unwrap(),
             59171
         );
+    }
+
+    #[test]
+    fn resolve_process_pid_retries_when_inspector_context_is_temporarily_undefined() {
+        let responses = [
+            json!({
+                "id": 1,
+                "result": {
+                    "result": {
+                        "type": "undefined"
+                    }
+                }
+            }),
+            json!({
+                "id": 2,
+                "result": {
+                    "result": {
+                        "type": "number",
+                        "value": 59171
+                    }
+                }
+            }),
+        ];
+        let mut calls = 0_usize;
+
+        let pid = super::resolve_process_pid_with_retry(
+            || {
+                let response = responses
+                    .get(calls)
+                    .cloned()
+                    .expect("test should have enough responses");
+                calls += 1;
+                Ok(response)
+            },
+            Duration::from_millis(50),
+            Duration::from_millis(0),
+        )
+        .expect("pid resolution should eventually succeed");
+
+        assert_eq!(pid, 59171);
+        assert_eq!(calls, 2, "should retry once after undefined result");
     }
 
     #[test]
