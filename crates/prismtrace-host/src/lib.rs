@@ -12,12 +12,12 @@ use prismtrace_core::{
     AttachFailure, AttachFailureKind, AttachReadiness, AttachSession, ProbeHealth, ProcessTarget,
 };
 use prismtrace_storage::StorageLayout;
-use request_capture::ProbeConsumeExit;
 use readiness::evaluate_targets;
+use request_capture::ProbeConsumeExit;
+use runtime::InstrumentationRuntime;
 use std::io;
 use std::io::Write;
 use std::path::PathBuf;
-use runtime::InstrumentationRuntime;
 
 pub const DEFAULT_BIND_ADDR: &str = "127.0.0.1:7799";
 
@@ -219,7 +219,9 @@ pub fn run_foreground_attach_session<R: InstrumentationRuntime>(
         })?;
 
     let mut controller = AttachController::new(LiveAttachBackend::new(runtime));
-    let attached_session = controller.attach(readiness).map_err(attach_failure_as_io_error)?;
+    let attached_session = controller
+        .attach(readiness)
+        .map_err(attach_failure_as_io_error)?;
 
     writeln!(output, "{}", attached_session.summary())?;
 
@@ -233,8 +235,12 @@ pub fn run_foreground_attach_session<R: InstrumentationRuntime>(
         )
     })?;
 
-    let consume_outcome =
-        request_capture::consume_probe_events(&result.storage, &attached_session.target, listener, output)?;
+    let consume_outcome = request_capture::consume_probe_events(
+        &result.storage,
+        &attached_session.target,
+        listener,
+        output,
+    )?;
 
     if let Some(listener) = consume_outcome.listener {
         controller.restore_listener(listener);
@@ -249,7 +255,10 @@ pub fn run_foreground_attach_session<R: InstrumentationRuntime>(
             .map_err(attach_failure_as_io_error)
     };
 
-    match (foreground_exit_as_error(&consume_outcome.exit), detach_result) {
+    match (
+        foreground_exit_as_error(&consume_outcome.exit),
+        detach_result,
+    ) {
         (None, Ok(())) => Ok(()),
         (Some(err), Ok(())) => Err(err),
         (None, Err(detach_err)) => Err(detach_err),
@@ -622,14 +631,9 @@ mod tests {
         let runtime = crate::runtime::ScriptedInstrumentationRuntime::success_with_messages(vec![]);
         let mut output = Vec::new();
 
-        let error = super::run_foreground_attach_session(
-            &result,
-            &source,
-            runtime,
-            999_999,
-            &mut output,
-        )
-        .expect_err("missing pid target should fail");
+        let error =
+            super::run_foreground_attach_session(&result, &source, runtime, 999_999, &mut output)
+                .expect_err("missing pid target should fail");
 
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
         assert!(error.to_string().contains("999999"));
@@ -639,7 +643,8 @@ mod tests {
     }
 
     #[test]
-    fn run_foreground_attach_session_attempts_detach_cleanup_after_capture_loop() -> io::Result<()> {
+    fn run_foreground_attach_session_attempts_detach_cleanup_after_capture_loop() -> io::Result<()>
+    {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
         let source = StaticProcessSampleSource::new(vec![ProcessSample {
@@ -894,7 +899,10 @@ mod tests {
             Ok(Box::new(Cursor::new(content.into_bytes())))
         }
 
-        fn send_detach_signal(&self, _pid: u32) -> Result<(), crate::runtime::InstrumentationError> {
+        fn send_detach_signal(
+            &self,
+            _pid: u32,
+        ) -> Result<(), crate::runtime::InstrumentationError> {
             self.detach_called.store(true, Ordering::SeqCst);
             Ok(())
         }

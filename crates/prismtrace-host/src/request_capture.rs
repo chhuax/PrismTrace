@@ -234,24 +234,27 @@ pub fn consume_probe_events(
         listener
     }));
 
-    let cleanup_worker =
-        |worker: &mut Option<thread::JoinHandle<IpcListener>>,
-         request_shutdown: bool|
-         -> Option<IpcListener> {
-            if request_shutdown {
-                if let Some(handle) = shutdown.as_ref() {
-                    handle.shutdown();
-                }
+    let cleanup_worker = |worker: &mut Option<thread::JoinHandle<IpcListener>>,
+                          request_shutdown: bool|
+     -> Option<IpcListener> {
+        if request_shutdown {
+            if let Some(handle) = shutdown.as_ref() {
+                handle.shutdown();
             }
-            let can_join = match worker.as_ref() {
-                None => false,
-                Some(join_handle) => !request_shutdown || shutdown.is_some() || join_handle.is_finished(),
-            };
-            if !can_join {
-                return None;
+        }
+        let can_join = match worker.as_ref() {
+            None => false,
+            Some(join_handle) => {
+                !request_shutdown || shutdown.is_some() || join_handle.is_finished()
             }
-            worker.take().and_then(|join_handle| join_handle.join().ok())
         };
+        if !can_join {
+            return None;
+        }
+        worker
+            .take()
+            .and_then(|join_handle| join_handle.join().ok())
+    };
 
     loop {
         let now = Instant::now();
@@ -553,8 +556,8 @@ mod tests {
         ));
         let listener = crate::ipc::IpcListener::new(reader, Duration::from_secs(15));
 
-        let outcome =
-            consume_probe_events(&storage, &target, listener, &mut output).expect("loop should succeed");
+        let outcome = consume_probe_events(&storage, &target, listener, &mut output)
+            .expect("loop should succeed");
 
         let text = String::from_utf8(output).expect("stdout should be utf8");
         assert!(text.contains("[captured] openai POST /v1/responses"));
@@ -577,8 +580,8 @@ mod tests {
             Arc::new(TestShutdown::new(Arc::clone(&state))),
         );
 
-        let outcome =
-            consume_probe_events(&storage, &target, listener, &mut output).expect("loop should finish");
+        let outcome = consume_probe_events(&storage, &target, listener, &mut output)
+            .expect("loop should finish");
 
         let text = String::from_utf8(output).expect("stdout should be utf8");
         assert!(text.contains("[probe-timeout]"));
@@ -605,8 +608,8 @@ mod tests {
             Duration::from_millis(5),
         );
 
-        let outcome =
-            consume_probe_events(&storage, &target, listener, &mut output).expect("loop should finish");
+        let outcome = consume_probe_events(&storage, &target, listener, &mut output)
+            .expect("loop should finish");
 
         let text = String::from_utf8(output).expect("stdout should be utf8");
         assert!(text.contains("[probe-timeout]"));
@@ -634,8 +637,8 @@ mod tests {
         );
 
         let started = Instant::now();
-        let outcome =
-            consume_probe_events(&storage, &target, listener, &mut output).expect("loop should finish");
+        let outcome = consume_probe_events(&storage, &target, listener, &mut output)
+            .expect("loop should finish");
         let elapsed = started.elapsed();
 
         assert!(

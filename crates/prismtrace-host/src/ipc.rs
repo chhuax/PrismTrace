@@ -247,7 +247,8 @@ mod tests {
 
     #[test]
     fn next_event_returns_heartbeat_timeout_when_reader_reports_transient_timeouts() {
-        let mut listener = IpcListener::new(Box::new(AlwaysWouldBlockReader), Duration::from_millis(5));
+        let mut listener =
+            IpcListener::new(Box::new(AlwaysWouldBlockReader), Duration::from_millis(5));
 
         match listener.next_event() {
             IpcEvent::HeartbeatTimeout { elapsed_ms } => assert!(elapsed_ms >= 5),
