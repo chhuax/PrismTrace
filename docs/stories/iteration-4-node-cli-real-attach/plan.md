@@ -4,6 +4,8 @@
 
 **Goal:** 把 `--attach <pid>` 收口为真实前台持续采集入口，并用真实 Node inspector 后端替换 `NodeInstrumentationRuntime` 占位实现，让纯 Node CLI 目标可以在不重启的前提下被 attach 并捕获至少一条真实请求。
 
+状态：已完成（已合并）
+
 **Architecture:** Host 仍然由 Rust 驱动 attach、inspector 建连、后台 WebSocket worker、消息桥接和前台消费循环；目标进程内继续执行现有 `bootstrap.js` probe，只把 emitter 抽象成可在 `stdout` 与 inspector bridge 间切换，并暴露一个可被 inspector 触发的 detach helper。`attach.rs` 和 `request_capture.rs` 尽量保持职责不变，只替换“怎么把 probe 放进去”和“attach 后是否持续消费事件”。
 
 **Tech Stack:** Rust workspace、Node.js bootstrap probe、blocking inspector HTTP/WebSocket client、`node --test`、`cargo test`
