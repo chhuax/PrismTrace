@@ -8,6 +8,8 @@ version.workspace = true
 prismtrace-core = { path = "../prismtrace-core" }
 prismtrace-storage = { path = "../prismtrace-storage" }
 serde_json = "1"
+tungstenite = "0.24"
+ureq = "2"
 
 [lib]
 path = "src/lib.rs"

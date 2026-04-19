@@ -27,9 +27,26 @@
    * process.send() is NOT used — it serialises JS objects through Node's IPC
    * channel protocol, which is incompatible with the host's line-oriented JSON reader.
    */
+  function emitLine(line) {
+    try {
+      if (typeof globalThis.__prismtraceEmit === 'function') {
+        globalThis.__prismtraceEmit(line);
+        return;
+      }
+
+      if (typeof process !== 'undefined' && process.stdout && typeof process.stdout.write === 'function') {
+        process.stdout.write(line);
+      }
+    } catch (_) {
+      // Emission is best-effort and must not affect target process behavior.
+    }
+  }
+
   function sendMessage(msg) {
-    if (typeof process !== 'undefined' && process.stdout && typeof process.stdout.write === 'function') {
-      process.stdout.write(JSON.stringify(msg) + '\n');
+    try {
+      emitLine(JSON.stringify(msg) + '\n');
+    } catch (_) {
+      // Emission is best-effort and must not affect target process behavior.
     }
   }
 
@@ -377,7 +394,18 @@
     if (typeof process !== 'undefined' && process.stdin) {
       process.stdin.pause();
     }
+    if (globalThis.__prismtraceDetach === triggerDetach) {
+      delete globalThis.__prismtraceDetach;
+    }
     removeAllHooks();
+  }
+
+  function triggerDetach() {
+    try {
+      sendMessage({ type: 'detach_ack', timestamp_ms: Date.now() });
+    } finally {
+      dispose();
+    }
   }
 
   var isTestMode =
@@ -386,6 +414,8 @@
     process.env.PRISMTRACE_PROBE_NO_AUTORUN === '1';
 
   if (!isTestMode) {
+    globalThis.__prismtraceDetach = triggerDetach;
+
     var detection = detectRuntimes();
     var hookResult = installHooks(detection.available);
 
@@ -423,8 +453,7 @@
           try {
             var msg = JSON.parse(line);
             if (msg && msg.type === 'detach') {
-              sendMessage({ type: 'detach_ack', timestamp_ms: Date.now() });
-              dispose();
+              triggerDetach();
             }
           } catch (_) {
             // Ignore malformed lines.
@@ -436,6 +465,6 @@
 
   // Export internals for testing (only when running under Node.js module system)
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { detectRuntimes, installHooks, removeAllHooks, dispose };
+    module.exports = { detectRuntimes, installHooks, removeAllHooks, sendMessage, triggerDetach, dispose };
   }
 })();

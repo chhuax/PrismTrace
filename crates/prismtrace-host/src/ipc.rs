@@ -20,6 +20,15 @@ pub enum IpcEvent {
     ChannelDisconnected { reason: String },
 }
 
+fn is_transient_read_error(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::TimedOut
+            | std::io::ErrorKind::WouldBlock
+            | std::io::ErrorKind::Interrupted
+    )
+}
+
 impl IpcListener {
     pub fn new(reader: Box<dyn BufRead + Send>, heartbeat_timeout: Duration) -> Self {
         Self {
@@ -58,6 +67,7 @@ impl IpcListener {
     /// Read the next IPC message from the reader (blocking).
     /// Returns:
     /// - `IpcEvent::Message` on successful parse
+    /// - `IpcEvent::HeartbeatTimeout` when no heartbeat arrives before deadline
     /// - `IpcEvent::ChannelDisconnected` on EOF or IO error (never panics)
     ///
     /// Non-IPC lines (e.g. application log output) are silently skipped so that
@@ -66,6 +76,10 @@ impl IpcListener {
     /// Updates `last_heartbeat` when a `Heartbeat` message is received.
     pub fn next_event(&mut self) -> IpcEvent {
         loop {
+            if let Some(event) = self.check_heartbeat_timeout() {
+                return event;
+            }
+
             let mut line = String::new();
             match self.reader.read_line(&mut line) {
                 Ok(0) => {
@@ -85,6 +99,12 @@ impl IpcListener {
                         continue;
                     }
                 },
+                Err(e) if is_transient_read_error(&e) => {
+                    if let Some(event) = self.check_heartbeat_timeout() {
+                        return event;
+                    }
+                    continue;
+                }
                 Err(e) => {
                     return IpcEvent::ChannelDisconnected {
                         reason: format!("IO error: {e}"),
@@ -113,6 +133,7 @@ impl IpcListener {
                     }
                     Err(_) => continue,
                 },
+                Err(err) if is_transient_read_error(&err) => continue,
                 Err(_) => return None,
             }
         }
@@ -135,7 +156,8 @@ impl IpcListener {
 mod tests {
     use super::{IpcEvent, IpcListener};
     use prismtrace_core::IpcMessage;
-    use std::io::Cursor;
+    use std::io::{BufRead, Cursor, Read};
+    use std::thread;
     use std::time::Duration;
 
     fn make_listener(data: &str, timeout: Duration) -> IpcListener {
@@ -221,5 +243,40 @@ mod tests {
             listener.check_heartbeat_timeout().is_none(),
             "should not timeout within 60s window"
         );
+    }
+
+    #[test]
+    fn next_event_returns_heartbeat_timeout_when_reader_reports_transient_timeouts() {
+        let mut listener =
+            IpcListener::new(Box::new(AlwaysWouldBlockReader), Duration::from_millis(5));
+
+        match listener.next_event() {
+            IpcEvent::HeartbeatTimeout { elapsed_ms } => assert!(elapsed_ms >= 5),
+            _ => panic!("expected HeartbeatTimeout for transient read timeouts"),
+        }
+    }
+
+    struct AlwaysWouldBlockReader;
+
+    impl Read for AlwaysWouldBlockReader {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            thread::sleep(Duration::from_millis(1));
+            Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "synthetic transient timeout",
+            ))
+        }
+    }
+
+    impl BufRead for AlwaysWouldBlockReader {
+        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            thread::sleep(Duration::from_millis(1));
+            Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "synthetic transient timeout",
+            ))
+        }
+
+        fn consume(&mut self, _amt: usize) {}
     }
 }

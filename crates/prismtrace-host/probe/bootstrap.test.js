@@ -19,6 +19,22 @@ const path = require('node:path');
 
 const BOOTSTRAP_PATH = path.resolve(__dirname, 'bootstrap.js');
 
+function snapshotGlobalProperty(name) {
+  const hasOwn = Object.prototype.hasOwnProperty.call(globalThis, name);
+  return {
+    hasOwn,
+    value: globalThis[name],
+  };
+}
+
+function restoreGlobalProperty(name, snapshot) {
+  if (snapshot.hasOwn) {
+    globalThis[name] = snapshot.value;
+  } else {
+    delete globalThis[name];
+  }
+}
+
 function freshModule() {
   delete require.cache[require.resolve(BOOTSTRAP_PATH)];
   return require(BOOTSTRAP_PATH);
@@ -228,5 +244,187 @@ test('fetch hook swallows observation errors and still calls original fetch', as
   } finally {
     globalThis.fetch = originalFetch;
     dispose();
+  }
+});
+
+test('sendMessage prefers global bridge emitter over stdout when bridge exists', function () {
+  const lines = [];
+  const writes = [];
+  const bridgeSnapshot = snapshotGlobalProperty('__prismtraceEmit');
+  const originalWrite = process.stdout.write;
+
+  globalThis.__prismtraceEmit = function (line) {
+    lines.push(String(line));
+  };
+  process.stdout.write = function (chunk) {
+    writes.push(String(chunk));
+    return true;
+  };
+
+  const { sendMessage, dispose } = freshModule();
+
+  try {
+    sendMessage({ type: 'heartbeat', timestamp_ms: 1 });
+    assert.equal(lines.length, 1, 'bridge should receive one line');
+    assert.equal(writes.length, 0, 'stdout should not be used when bridge exists');
+    assert.match(lines[0], /"type":"heartbeat"/);
+    assert.ok(lines[0].endsWith('\n'), 'bridge line should end with newline');
+  } finally {
+    process.stdout.write = originalWrite;
+    restoreGlobalProperty('__prismtraceEmit', bridgeSnapshot);
+    dispose();
+  }
+});
+
+test('sendMessage falls back to stdout when bridge emitter is absent', function () {
+  const writes = [];
+  const bridgeSnapshot = snapshotGlobalProperty('__prismtraceEmit');
+  const originalWrite = process.stdout.write;
+
+  delete globalThis.__prismtraceEmit;
+  process.stdout.write = function (chunk) {
+    writes.push(String(chunk));
+    return true;
+  };
+
+  const { sendMessage, dispose } = freshModule();
+
+  try {
+    sendMessage({ type: 'heartbeat', timestamp_ms: 2 });
+    assert.equal(writes.length, 1, 'stdout should receive one line without bridge');
+    assert.match(writes[0], /"type":"heartbeat"/);
+    assert.ok(writes[0].endsWith('\n'), 'stdout line should end with newline');
+  } finally {
+    process.stdout.write = originalWrite;
+    restoreGlobalProperty('__prismtraceEmit', bridgeSnapshot);
+    dispose();
+  }
+});
+
+test('triggerDetach emits detach_ack and disposes installed hooks', function () {
+  const lines = [];
+  const bridgeSnapshot = snapshotGlobalProperty('__prismtraceEmit');
+  const originalFetch = globalThis.fetch;
+
+  globalThis.__prismtraceEmit = function (line) {
+    lines.push(String(line));
+  };
+  globalThis.fetch = function fakeFetch() {
+    return Promise.resolve({ ok: true, status: 200 });
+  };
+
+  const fakeFetchRef = globalThis.fetch;
+  const { installHooks, triggerDetach, dispose } = freshModule();
+
+  try {
+    installHooks(['fetch']);
+    assert.notEqual(globalThis.fetch, fakeFetchRef, 'fetch should be patched after hook install');
+
+    triggerDetach();
+    assert.equal(globalThis.fetch, fakeFetchRef, 'fetch hook should be restored on detach');
+
+    const ack = lines.find((line) => line.includes('"type":"detach_ack"'));
+    assert.ok(ack, 'detach_ack should be emitted');
+    assert.ok(ack.endsWith('\n'), 'detach ack should end with newline');
+  } finally {
+    restoreGlobalProperty('__prismtraceEmit', bridgeSnapshot);
+    globalThis.fetch = originalFetch;
+    dispose();
+  }
+});
+
+test('sendMessage swallows bridge emitter errors', function () {
+  const bridgeSnapshot = snapshotGlobalProperty('__prismtraceEmit');
+  const writes = [];
+  const originalWrite = process.stdout.write;
+
+  globalThis.__prismtraceEmit = function () {
+    throw new Error('bridge boom');
+  };
+  process.stdout.write = function (chunk) {
+    writes.push(String(chunk));
+    return true;
+  };
+
+  const { sendMessage, dispose } = freshModule();
+
+  try {
+    assert.doesNotThrow(function () {
+      sendMessage({ type: 'heartbeat', timestamp_ms: 3 });
+    });
+    assert.equal(writes.length, 0, 'stdout should not be used when bridge emitter throws');
+  } finally {
+    process.stdout.write = originalWrite;
+    restoreGlobalProperty('__prismtraceEmit', bridgeSnapshot);
+    dispose();
+  }
+});
+
+test('sendMessage swallows stdout errors when bridge is absent', function () {
+  const bridgeSnapshot = snapshotGlobalProperty('__prismtraceEmit');
+  const originalWrite = process.stdout.write;
+
+  delete globalThis.__prismtraceEmit;
+  process.stdout.write = function () {
+    throw new Error('stdout boom');
+  };
+
+  const { sendMessage, dispose } = freshModule();
+
+  try {
+    assert.doesNotThrow(function () {
+      sendMessage({ type: 'heartbeat', timestamp_ms: 4 });
+    });
+  } finally {
+    process.stdout.write = originalWrite;
+    restoreGlobalProperty('__prismtraceEmit', bridgeSnapshot);
+    dispose();
+  }
+});
+
+test('triggerDetach always disposes hooks when detach ack emit fails', function () {
+  const bridgeSnapshot = snapshotGlobalProperty('__prismtraceEmit');
+  const originalFetch = globalThis.fetch;
+
+  globalThis.__prismtraceEmit = function () {
+    throw new Error('detach emit failed');
+  };
+  globalThis.fetch = function fakeFetch() {
+    return Promise.resolve({ ok: true, status: 200 });
+  };
+
+  const fakeFetchRef = globalThis.fetch;
+  const { installHooks, triggerDetach, dispose } = freshModule();
+
+  try {
+    installHooks(['fetch']);
+    assert.notEqual(globalThis.fetch, fakeFetchRef, 'fetch should be patched after hook install');
+
+    assert.doesNotThrow(function () {
+      triggerDetach();
+    });
+    assert.equal(globalThis.fetch, fakeFetchRef, 'fetch should be restored even when ack emit fails');
+  } finally {
+    restoreGlobalProperty('__prismtraceEmit', bridgeSnapshot);
+    globalThis.fetch = originalFetch;
+    dispose();
+  }
+});
+
+test('dispose clears registered global detach helper', function () {
+  const detachSnapshot = snapshotGlobalProperty('__prismtraceDetach');
+  const { triggerDetach, dispose } = freshModule();
+
+  globalThis.__prismtraceDetach = triggerDetach;
+
+  try {
+    dispose();
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(globalThis, '__prismtraceDetach'),
+      false,
+      '__prismtraceDetach should be removed by dispose'
+    );
+  } finally {
+    restoreGlobalProperty('__prismtraceDetach', detachSnapshot);
   }
 });

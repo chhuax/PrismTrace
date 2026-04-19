@@ -106,6 +106,14 @@ impl<R: InstrumentationRuntime> LiveAttachBackend<R> {
     pub fn listener_mut(&mut self) -> Option<&mut IpcListener> {
         self.ipc_listener.as_mut()
     }
+
+    pub fn take_listener(&mut self) -> Option<IpcListener> {
+        self.ipc_listener.take()
+    }
+
+    pub fn restore_listener(&mut self, listener: IpcListener) {
+        self.ipc_listener = Some(listener);
+    }
 }
 
 pub const DETACH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -346,6 +354,16 @@ impl<B: AttachBackend> AttachController<B> {
                 Err(failure)
             }
         }
+    }
+}
+
+impl<R: InstrumentationRuntime> AttachController<LiveAttachBackend<R>> {
+    pub fn take_listener(&mut self) -> Option<IpcListener> {
+        self.backend.take_listener()
+    }
+
+    pub fn restore_listener(&mut self, listener: IpcListener) {
+        self.backend.restore_listener(listener);
     }
 }
 

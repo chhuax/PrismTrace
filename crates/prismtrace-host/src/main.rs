@@ -3,18 +3,14 @@ fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     if let Some(pid) = attach_pid_arg(&args)? {
-        let snapshot = prismtrace_host::collect_attach_snapshot(
+        let mut stdout = std::io::stdout().lock();
+        prismtrace_host::run_foreground_attach_session(
             &result,
             &prismtrace_host::discovery::PsProcessSampleSource,
-            // NOTE: NodeInstrumentationRuntime is a placeholder that always returns
-            // InjectionFailed — real dynamic instrumentation is not yet implemented.
-            // ScriptedAttachBackend is used here so --attach produces a meaningful
-            // result until a real backend lands in a future iteration.
-            prismtrace_host::attach::ScriptedAttachBackend::ready(),
+            prismtrace_host::runtime::NodeInstrumentationRuntime,
             pid,
+            &mut stdout,
         )?;
-
-        println!("{}", prismtrace_host::attach_snapshot_report(&snapshot));
         return Ok(());
     }
 
