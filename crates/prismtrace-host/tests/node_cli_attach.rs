@@ -14,7 +14,8 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[test]
-fn attach_to_running_node_cli_captures_request_and_writes_artifact() -> io::Result<()> {
+fn attach_to_running_node_cli_captures_request_and_response_and_writes_artifacts() -> io::Result<()>
+{
     let workspace = TempWorkspace::new("node-cli-attach")?;
     let script_path = write_node_target_script(workspace.path())?;
     let node_bin = resolve_node_binary()?;
@@ -57,6 +58,10 @@ fn attach_to_running_node_cli_captures_request_and_writes_artifact() -> io::Resu
         output_text.contains("[captured]"),
         "foreground output should include captured summary: {output_text}"
     );
+    assert!(
+        output_text.contains("[response]"),
+        "foreground output should include response summary: {output_text}"
+    );
 
     assert!(
         fake_server.request_count() >= 1,
@@ -69,11 +74,23 @@ fn attach_to_running_node_cli_captures_request_and_writes_artifact() -> io::Resu
         .join("state")
         .join("artifacts")
         .join("requests");
-    let artifact_count = fs::read_dir(&request_artifacts_dir)?.count();
+    let response_artifacts_dir = workspace
+        .path()
+        .join(".prismtrace")
+        .join("state")
+        .join("artifacts")
+        .join("responses");
+    let request_artifact_count = fs::read_dir(&request_artifacts_dir)?.count();
+    let response_artifact_count = fs::read_dir(&response_artifacts_dir)?.count();
     assert!(
-        artifact_count >= 1,
+        request_artifact_count >= 1,
         "expected at least one request artifact under {}",
         request_artifacts_dir.display()
+    );
+    assert!(
+        response_artifact_count >= 1,
+        "expected at least one response artifact under {}",
+        response_artifacts_dir.display()
     );
 
     let exit_status = child.wait_for_exit(Duration::from_secs(5))?;

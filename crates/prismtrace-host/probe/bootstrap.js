@@ -15,6 +15,7 @@
 
   var HEARTBEAT_INTERVAL_MS = 5000;
   var BODY_TEXT_LIMIT_BYTES = 64 * 1024;
+  var exchangeCounter = 0;
 
   // ── IPC helpers ──────────────────────────────────────────────────────────────
 
@@ -106,16 +107,38 @@
     return { text: null, truncated: false };
   }
 
+  function nextExchangeId() {
+    exchangeCounter += 1;
+    return 'ex-' + Date.now() + '-' + exchangeCounter;
+  }
+
   function emitObservedRequest(observed) {
     sendMessage({
       type: 'http_request_observed',
+      exchange_id: observed.exchangeId,
       hook_name: observed.hookName,
       method: observed.method,
       url: observed.url,
       headers: observed.headers,
       body_text: observed.bodyText,
       body_truncated: observed.bodyTruncated,
-      timestamp_ms: Date.now(),
+      timestamp_ms: observed.timestampMs == null ? Date.now() : observed.timestampMs,
+    });
+  }
+
+  function emitObservedResponse(observed) {
+    sendMessage({
+      type: 'http_response_observed',
+      exchange_id: observed.exchangeId,
+      hook_name: observed.hookName,
+      method: observed.method,
+      url: observed.url,
+      status_code: observed.statusCode,
+      headers: observed.headers,
+      body_text: observed.bodyText,
+      body_truncated: observed.bodyTruncated,
+      started_at_ms: observed.startedAtMs,
+      completed_at_ms: observed.completedAtMs,
     });
   }
 
@@ -229,21 +252,45 @@
             var originalFetch = globalThis.fetch;
             originals['fetch'] = originalFetch;
             globalThis.fetch = function patchedFetch(input, init) {
+              var exchangeId = nextExchangeId();
+              var startedAtMs = Date.now();
+              var method = (init && init.method) || (input && input.method) || 'GET';
+              var url = toUrlString(input);
               observeRequestSafely(function () {
-                var method = (init && init.method) || (input && input.method) || 'GET';
                 var headers = normalizeHeaders((init && init.headers) || (input && input.headers) || {});
                 var bodySource = init && Object.prototype.hasOwnProperty.call(init, 'body') ? init.body : input && input.body;
                 var bodyInfo = toBodyText(bodySource);
                 return {
+                  exchangeId: exchangeId,
                   hookName: 'fetch',
                   method: String(method).toUpperCase(),
-                  url: toUrlString(input),
+                  url: url,
                   headers: headers,
                   bodyText: bodyInfo.text,
                   bodyTruncated: bodyInfo.truncated,
+                  timestampMs: startedAtMs,
                 };
               });
-              return originalFetch.apply(this, arguments);
+              return Promise.resolve(originalFetch.apply(this, arguments)).then(function (response) {
+                try {
+                  emitObservedResponse({
+                    exchangeId: exchangeId,
+                    hookName: 'fetch',
+                    method: String(method).toUpperCase(),
+                    url: url,
+                    statusCode: response && response.status ? response.status : 0,
+                    headers: normalizeHeaders(response && response.headers ? response.headers : {}),
+                    bodyText: null,
+                    bodyTruncated: false,
+                    startedAtMs: startedAtMs,
+                    completedAtMs: Date.now(),
+                  });
+                } catch (_) {
+                  // Response observation is best-effort and must not affect fetch behavior.
+                }
+
+                return response;
+              });
             };
             installedHooks.add('fetch');
             installed.push('fetch');
@@ -256,18 +303,40 @@
             originals['undici'] = originalRequest;
             undici.request = function patchedUndiciRequest(url, options) {
               options = options || {};
+              var exchangeId = nextExchangeId();
+              var startedAtMs = Date.now();
               observeRequestSafely(function () {
                 var bodyInfo = toBodyText(options.body);
                 return {
+                  exchangeId: exchangeId,
                   hookName: 'undici',
                   method: String(options.method || 'GET').toUpperCase(),
                   url: toUrlString(url),
                   headers: normalizeHeaders(options.headers || {}),
                   bodyText: bodyInfo.text,
                   bodyTruncated: bodyInfo.truncated,
+                  timestampMs: startedAtMs,
                 };
               });
-              return originalRequest.apply(this, arguments);
+              return Promise.resolve(originalRequest.apply(this, arguments)).then(function (response) {
+                try {
+                  emitObservedResponse({
+                    exchangeId: exchangeId,
+                    hookName: 'undici',
+                    method: String(options.method || 'GET').toUpperCase(),
+                    url: toUrlString(url),
+                    statusCode: response && response.statusCode ? response.statusCode : 0,
+                    headers: normalizeHeaders(response && response.headers ? response.headers : {}),
+                    bodyText: null,
+                    bodyTruncated: false,
+                    startedAtMs: startedAtMs,
+                    completedAtMs: Date.now(),
+                  });
+                } catch (_) {
+                  // Response observation is best-effort and must not affect request behavior.
+                }
+                return response;
+              });
             };
             installedHooks.add('undici');
             installed.push('undici');
@@ -281,18 +350,43 @@
             http.request = function patchedHttpRequest(options, callbackOptions) {
               var requestOptions =
                 typeof options === 'string' || options instanceof URL ? callbackOptions || {} : options || {};
+              var exchangeId = nextExchangeId();
+              var startedAtMs = Date.now();
               observeRequestSafely(function () {
                 var bodyInfo = toBodyText(requestOptions.body);
                 return {
+                  exchangeId: exchangeId,
                   hookName: 'http',
                   method: String(requestOptions.method || 'GET').toUpperCase(),
                   url: requestUrlFromHttpArgs(options, callbackOptions, 'http'),
                   headers: normalizeHeaders(requestOptions.headers || {}),
                   bodyText: bodyInfo.text,
                   bodyTruncated: bodyInfo.truncated,
+                  timestampMs: startedAtMs,
                 };
               });
-              return originalHttpRequest.apply(this, arguments);
+              var request = originalHttpRequest.apply(this, arguments);
+              try {
+                if (request && typeof request.once === 'function') {
+                  request.once('response', function (response) {
+                    emitObservedResponse({
+                      exchangeId: exchangeId,
+                      hookName: 'http',
+                      method: String(requestOptions.method || 'GET').toUpperCase(),
+                      url: requestUrlFromHttpArgs(options, callbackOptions, 'http'),
+                      statusCode: response && response.statusCode ? response.statusCode : 0,
+                      headers: normalizeHeaders(response && response.headers ? response.headers : {}),
+                      bodyText: null,
+                      bodyTruncated: false,
+                      startedAtMs: startedAtMs,
+                      completedAtMs: Date.now(),
+                    });
+                  });
+                }
+              } catch (_) {
+                // Response observation is best-effort and must not affect request behavior.
+              }
+              return request;
             };
             installedHooks.add('http');
             installed.push('http');
@@ -306,18 +400,43 @@
             https.request = function patchedHttpsRequest(options, callbackOptions) {
               var requestOptions =
                 typeof options === 'string' || options instanceof URL ? callbackOptions || {} : options || {};
+              var exchangeId = nextExchangeId();
+              var startedAtMs = Date.now();
               observeRequestSafely(function () {
                 var bodyInfo = toBodyText(requestOptions.body);
                 return {
+                  exchangeId: exchangeId,
                   hookName: 'https',
                   method: String(requestOptions.method || 'GET').toUpperCase(),
                   url: requestUrlFromHttpArgs(options, callbackOptions, 'https'),
                   headers: normalizeHeaders(requestOptions.headers || {}),
                   bodyText: bodyInfo.text,
                   bodyTruncated: bodyInfo.truncated,
+                  timestampMs: startedAtMs,
                 };
               });
-              return originalHttpsRequest.apply(this, arguments);
+              var request = originalHttpsRequest.apply(this, arguments);
+              try {
+                if (request && typeof request.once === 'function') {
+                  request.once('response', function (response) {
+                    emitObservedResponse({
+                      exchangeId: exchangeId,
+                      hookName: 'https',
+                      method: String(requestOptions.method || 'GET').toUpperCase(),
+                      url: requestUrlFromHttpArgs(options, callbackOptions, 'https'),
+                      statusCode: response && response.statusCode ? response.statusCode : 0,
+                      headers: normalizeHeaders(response && response.headers ? response.headers : {}),
+                      bodyText: null,
+                      bodyTruncated: false,
+                      startedAtMs: startedAtMs,
+                      completedAtMs: Date.now(),
+                    });
+                  });
+                }
+              } catch (_) {
+                // Response observation is best-effort and must not affect request behavior.
+              }
+              return request;
             };
             installedHooks.add('https');
             installed.push('https');

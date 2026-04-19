@@ -320,6 +320,7 @@ pub enum IpcMessage {
         timestamp_ms: u64,
     },
     HttpRequestObserved {
+        exchange_id: String,
         hook_name: String,
         method: String,
         url: String,
@@ -327,6 +328,18 @@ pub enum IpcMessage {
         body_text: Option<String>,
         body_truncated: bool,
         timestamp_ms: u64,
+    },
+    HttpResponseObserved {
+        exchange_id: String,
+        hook_name: String,
+        method: String,
+        url: String,
+        status_code: u16,
+        headers: Vec<HttpHeader>,
+        body_text: Option<String>,
+        body_truncated: bool,
+        started_at_ms: u64,
+        completed_at_ms: u64,
     },
     DetachAck {
         timestamp_ms: u64,
@@ -589,8 +602,9 @@ mod tests {
     }
 
     #[test]
-    fn ipc_message_http_request_observed_round_trip() {
+    fn ipc_message_http_request_observed_round_trip_with_exchange_id() {
         let msg = IpcMessage::HttpRequestObserved {
+            exchange_id: "ex-1".into(),
             hook_name: "fetch".into(),
             method: "POST".into(),
             url: "https://api.openai.com/v1/responses".into(),
@@ -614,12 +628,38 @@ mod tests {
     }
 
     #[test]
+    fn ipc_message_http_response_observed_round_trip() {
+        let msg = IpcMessage::HttpResponseObserved {
+            exchange_id: "ex-1".into(),
+            hook_name: "fetch".into(),
+            method: "POST".into(),
+            url: "https://api.openai.com/v1/responses".into(),
+            status_code: 200,
+            headers: vec![HttpHeader {
+                name: "content-type".into(),
+                value: "application/json".into(),
+            }],
+            body_text: Some(
+                r#"{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}"#
+                    .into(),
+            ),
+            body_truncated: false,
+            started_at_ms: 100,
+            completed_at_ms: 180,
+        };
+        let line = msg.to_json_line();
+        let parsed = IpcMessage::from_json_line(&line).expect("should parse response event");
+        assert_eq!(parsed, msg);
+    }
+
+    #[test]
     fn ipc_message_http_request_observed_parses_without_body() {
-        let line = r#"{"type":"http_request_observed","hook_name":"http","method":"GET","url":"https://openrouter.ai/api/v1/chat/completions","headers":[],"body_text":null,"body_truncated":false,"timestamp_ms":9}"#;
+        let line = r#"{"type":"http_request_observed","exchange_id":"ex-2","hook_name":"http","method":"GET","url":"https://openrouter.ai/api/v1/chat/completions","headers":[],"body_text":null,"body_truncated":false,"timestamp_ms":9}"#;
         let parsed = IpcMessage::from_json_line(line).expect("should parse request without body");
         assert_eq!(
             parsed,
             IpcMessage::HttpRequestObserved {
+                exchange_id: "ex-2".into(),
                 hook_name: "http".into(),
                 method: "GET".into(),
                 url: "https://openrouter.ai/api/v1/chat/completions".into(),

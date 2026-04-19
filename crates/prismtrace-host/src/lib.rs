@@ -4,6 +4,7 @@ pub mod ipc;
 pub mod probe_health;
 pub mod readiness;
 pub mod request_capture;
+pub mod response_capture;
 pub mod runtime;
 
 use attach::{AttachBackend, AttachController, LiveAttachBackend, attach_report};
@@ -659,6 +660,7 @@ mod tests {
                 }
                 .to_json_line(),
                 IpcMessage::HttpRequestObserved {
+                    exchange_id: "ex-lib".into(),
                     hook_name: "fetch".into(),
                     method: "POST".into(),
                     url: "https://api.openai.com/v1/responses".into(),

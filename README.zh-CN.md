@@ -55,3 +55,5 @@ cargo run -p prismtrace-host -- --discover
 cargo run -p prismtrace-host -- --readiness
 cargo run -p prismtrace-host -- --attach <pid>
 ```
+
+`--attach <pid>` 当前会进入前台 attach 会话，并对受支持的运行中 Node CLI 目标捕获 request 与 response artifacts。
