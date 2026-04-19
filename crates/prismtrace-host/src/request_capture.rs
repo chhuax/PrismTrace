@@ -1,21 +1,23 @@
 use crate::ipc::{IpcEvent, IpcListener};
+use crate::response_capture;
 use prismtrace_core::{HttpHeader, IpcMessage, ProcessTarget};
 use prismtrace_storage::StorageLayout;
 use std::fs;
 use std::io;
 use std::io::Write;
 use std::path::PathBuf;
+use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-fn path_only(url: &str) -> &str {
+pub(crate) fn path_only(url: &str) -> &str {
     parse_host_and_path(url)
         .map(|(_, path)| path)
         .unwrap_or_else(|| url.split(['?', '#']).next().unwrap_or(url))
 }
 
-fn parse_host_and_path(url: &str) -> Option<(&str, &str)> {
+pub(crate) fn parse_host_and_path(url: &str) -> Option<(&str, &str)> {
     let (_, rest) = url.split_once("://")?;
     let authority_end = rest
         .find(|c| ['/', '?', '#'].contains(&c))
@@ -37,13 +39,13 @@ fn parse_host_and_path(url: &str) -> Option<(&str, &str)> {
     Some((host, path))
 }
 
-fn is_sensitive_header(name: &str) -> bool {
+pub(crate) fn is_sensitive_header(name: &str) -> bool {
     name.eq_ignore_ascii_case("authorization")
         || name.eq_ignore_ascii_case("x-api-key")
         || name.eq_ignore_ascii_case("proxy-authorization")
 }
 
-fn sanitized_headers(headers: &[HttpHeader]) -> Vec<HttpHeader> {
+pub(crate) fn sanitized_headers(headers: &[HttpHeader]) -> Vec<HttpHeader> {
     headers
         .iter()
         .map(|header| HttpHeader {
@@ -60,6 +62,7 @@ fn sanitized_headers(headers: &[HttpHeader]) -> Vec<HttpHeader> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapturedRequestEvent {
     pub event_id: String,
+    pub exchange_id: String,
     pub pid: u32,
     pub target_display_name: String,
     pub provider_hint: String,
@@ -84,7 +87,7 @@ pub struct ProbeConsumeOutcome {
     pub listener: Option<IpcListener>,
 }
 
-fn detect_provider_hint(
+pub(crate) fn detect_provider_hint(
     url: &str,
     headers: &[HttpHeader],
     body_text: Option<&str>,
@@ -133,6 +136,7 @@ pub fn capture_observed_request(
     sequence: u64,
 ) -> io::Result<Option<CapturedRequestEvent>> {
     let IpcMessage::HttpRequestObserved {
+        exchange_id,
         hook_name,
         method,
         url,
@@ -162,6 +166,7 @@ pub fn capture_observed_request(
         &artifact_path,
         serde_json::json!({
             "event_id": event_id,
+            "exchange_id": exchange_id,
             "pid": target.pid,
             "target_display_name": target.display_name(),
             "provider_hint": provider_hint,
@@ -179,6 +184,7 @@ pub fn capture_observed_request(
 
     Ok(Some(CapturedRequestEvent {
         event_id,
+        exchange_id: exchange_id.clone(),
         pid: target.pid,
         target_display_name: target.display_name().to_string(),
         provider_hint: provider_hint.to_string(),
@@ -205,6 +211,7 @@ pub fn consume_probe_events(
     output: &mut impl Write,
 ) -> io::Result<ProbeConsumeOutcome> {
     let mut sequence = 1_u64;
+    let mut provider_hints_by_exchange = HashMap::new();
     let timeout = listener.heartbeat_timeout();
     // Give the worker enough room to surface a heartbeat timeout event even when
     // the underlying bridge reader wakes on a coarser timeout cadence.
@@ -283,6 +290,29 @@ pub fn consume_probe_events(
                 refresh_wait_deadline(&mut wait_deadline);
                 if let Some(event) = capture_observed_request(storage, target, &message, sequence)?
                 {
+                    provider_hints_by_exchange
+                        .insert(event.exchange_id.clone(), event.provider_hint.clone());
+                    writeln!(output, "{}", event.summary)?;
+                    sequence += 1;
+                }
+            }
+            Ok(IpcEvent::Message(
+                ref message @ IpcMessage::HttpResponseObserved {
+                    ref exchange_id, ..
+                },
+            )) => {
+                refresh_wait_deadline(&mut wait_deadline);
+                if let Some(event) =
+                    response_capture::capture_observed_response_with_hint(
+                        storage,
+                        target,
+                        message,
+                        sequence,
+                        provider_hints_by_exchange
+                            .get(exchange_id)
+                            .map(String::as_str),
+                    )?
+                {
                     writeln!(output, "{}", event.summary)?;
                     sequence += 1;
                 }
@@ -352,6 +382,7 @@ mod tests {
             runtime_kind: RuntimeKind::Electron,
         };
         let msg = IpcMessage::HttpRequestObserved {
+            exchange_id: "ex-1".into(),
             hook_name: "fetch".into(),
             method: "POST".into(),
             url: "https://api.openai.com/v1/responses".into(),
@@ -368,6 +399,7 @@ mod tests {
             .expect("capture should succeed")
             .expect("request should match provider filters");
 
+        assert_eq!(event.exchange_id, "ex-1");
         assert_eq!(event.provider_hint, "openai");
         assert!(
             event
@@ -392,6 +424,7 @@ mod tests {
         storage.initialize().expect("storage should initialize");
         let target = sample_target();
         let msg = IpcMessage::HttpRequestObserved {
+            exchange_id: "ex-2".into(),
             hook_name: "fetch".into(),
             method: "POST".into(),
             url: "https://api.openai.com/v1/responses".into(),
@@ -434,6 +467,7 @@ mod tests {
             runtime_kind: RuntimeKind::Node,
         };
         let msg = IpcMessage::HttpRequestObserved {
+            exchange_id: "ex-3".into(),
             hook_name: "http".into(),
             method: "GET".into(),
             url: "https://example.com/healthz".into(),
@@ -458,6 +492,7 @@ mod tests {
         storage.initialize().expect("storage should initialize");
         let target = sample_target();
         let msg = IpcMessage::HttpRequestObserved {
+            exchange_id: "ex-4".into(),
             hook_name: "fetch".into(),
             method: "POST".into(),
             url: "https://example.com/collect?next=https://api.openai.com/v1/responses".into(),
@@ -485,6 +520,7 @@ mod tests {
         storage.initialize().expect("storage should initialize");
         let target = sample_target();
         let msg = IpcMessage::HttpRequestObserved {
+            exchange_id: "ex-5".into(),
             hook_name: "fetch".into(),
             method: "POST".into(),
             url: "https://api.openai.com/v1/responses".into(),
@@ -512,6 +548,7 @@ mod tests {
         storage.initialize().expect("storage should initialize");
         let target = sample_target();
         let msg = IpcMessage::HttpRequestObserved {
+            exchange_id: "ex-6".into(),
             hook_name: "fetch".into(),
             method: "POST".into(),
             url: "https://api.openai.com/v1/responses?api-version=1&sig=secret".into(),
@@ -547,6 +584,7 @@ mod tests {
             format!(
                 "{}{}",
                 IpcMessage::HttpRequestObserved {
+                    exchange_id: "ex-loop".into(),
                     hook_name: "fetch".into(),
                     method: "POST".into(),
                     url: "https://api.openai.com/v1/responses".into(),

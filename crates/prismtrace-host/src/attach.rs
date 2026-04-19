@@ -573,6 +573,7 @@ mod tests {
         let runtime = ScriptedInstrumentationRuntime::success_with_messages(vec![
             bootstrap_report_line(),
             IpcMessage::HttpRequestObserved {
+                exchange_id: "ex-attach".into(),
                 hook_name: "fetch".into(),
                 method: "POST".into(),
                 url: "https://api.openai.com/v1/responses".into(),

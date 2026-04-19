@@ -178,6 +178,52 @@ test('fetch hook emits http_request_observed for JSON request bodies', async fun
   }
 });
 
+test('fetch hook emits matching request and response events with same exchange id', async function () {
+  const writes = [];
+  const originalWrite = process.stdout.write;
+  process.stdout.write = function (chunk) {
+    writes.push(String(chunk));
+    return true;
+  };
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function fakeFetch() {
+    return new Response('{"ok":true}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  const { installHooks, dispose } = freshModule();
+
+  try {
+    installHooks(['fetch']);
+
+    await globalThis.fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"model":"gpt-test","input":"hi"}',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const requestEvent = writes.find((line) => line.includes('"type":"http_request_observed"'));
+    const responseEvent = writes.find((line) => line.includes('"type":"http_response_observed"'));
+
+    assert.ok(requestEvent, 'expected request event');
+    assert.ok(responseEvent, 'expected response event');
+
+    const requestJson = JSON.parse(requestEvent);
+    const responseJson = JSON.parse(responseEvent);
+    assert.equal(requestJson.exchange_id, responseJson.exchange_id);
+    assert.equal(responseJson.status_code, 200);
+  } finally {
+    process.stdout.write = originalWrite;
+    globalThis.fetch = originalFetch;
+    dispose();
+  }
+});
+
 test('http hook ignores non-text request bodies without throwing', function () {
   const writes = [];
   const originalWrite = process.stdout.write;
@@ -218,6 +264,12 @@ test('http hook ignores non-text request bodies without throwing', function () {
 
 test('fetch hook swallows observation errors and still calls original fetch', async function () {
   let called = false;
+  const writes = [];
+  const originalWrite = process.stdout.write;
+  process.stdout.write = function (chunk) {
+    writes.push(String(chunk));
+    return true;
+  };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async function fakeFetch() {
     called = true;
@@ -242,6 +294,7 @@ test('fetch hook swallows observation errors and still calls original fetch', as
 
     assert.equal(called, true, 'original fetch should still be called');
   } finally {
+    process.stdout.write = originalWrite;
     globalThis.fetch = originalFetch;
     dispose();
   }

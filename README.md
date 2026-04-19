@@ -55,3 +55,5 @@ cargo run -p prismtrace-host -- --discover
 cargo run -p prismtrace-host -- --readiness
 cargo run -p prismtrace-host -- --attach <pid>
 ```
+
+`--attach <pid>` currently performs a foreground attach session that can capture request and response artifacts for supported running Node CLI targets.
