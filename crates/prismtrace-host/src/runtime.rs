@@ -11,6 +11,8 @@ use tungstenite::client::{IntoClientRequest, client as ws_client};
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Error as WsError, Message, WebSocket};
 
+use crate::attach::PROCESS_PID_EXPRESSION;
+
 /// Replaceable instrumentation runtime adapter.
 /// Production implementations call a real dynamic instrumentation backend;
 /// test implementations return controlled results.
@@ -1008,7 +1010,7 @@ impl InstrumentationRuntime for NodeInstrumentationRuntime {
             || {
                 evaluate_expression(
                     &mut session,
-                    "process.pid",
+                    PROCESS_PID_EXPRESSION,
                     CDP_REQUEST_TIMEOUT,
                     InstrumentationErrorKind::InjectionFailed,
                     "process.pid verification",
@@ -1355,6 +1357,12 @@ node    42424 huaxin   23u  IPv4 0x75a73a76      0t0  TCP 127.0.0.1:9229 (LISTEN
 
         assert_eq!(pid, 59171);
         assert_eq!(calls, 2, "should retry once after undefined result");
+    }
+
+    #[test]
+    fn process_pid_expression_uses_process_fallbacks_when_global_process_is_missing() {
+        assert!(super::PROCESS_PID_EXPRESSION.contains("require(\"process\").pid"));
+        assert!(super::PROCESS_PID_EXPRESSION.contains("globalThis.process"));
     }
 
     #[test]

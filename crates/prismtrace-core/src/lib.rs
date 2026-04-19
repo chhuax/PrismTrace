@@ -24,6 +24,7 @@ pub struct ProcessTarget {
     pub pid: u32,
     pub app_name: String,
     pub executable_path: PathBuf,
+    pub command_line: Option<String>,
     pub runtime_kind: RuntimeKind,
 }
 
@@ -45,9 +46,66 @@ pub struct ProcessSample {
     pub pid: u32,
     pub process_name: String,
     pub executable_path: PathBuf,
+    pub command_line: Option<String>,
 }
 
 impl ProcessSample {
+    fn first_script_argument<'a, I>(parts: &mut I) -> Option<&'a str>
+    where
+        I: Iterator<Item = &'a str>,
+    {
+        while let Some(part) = parts.next() {
+            if part == "--" {
+                return parts.next();
+            }
+
+            if matches!(
+                part,
+                "-r" | "--require" | "--loader" | "--import" | "-e" | "--eval" | "-p" | "--print"
+            ) {
+                let _ = parts.next();
+                continue;
+            }
+
+            if part.starts_with("--require=")
+                || part.starts_with("--loader=")
+                || part.starts_with("--import=")
+                || part.starts_with("--eval=")
+                || part.starts_with("--print=")
+            {
+                continue;
+            }
+
+            if part.starts_with('-') {
+                continue;
+            }
+
+            return Some(part);
+        }
+
+        None
+    }
+
+    fn script_name_from_command_line(&self) -> Option<String> {
+        let command_line = self.command_line.as_deref()?;
+        let mut parts = command_line.split_whitespace();
+        let _runtime = parts.next()?;
+
+        let script = Self::first_script_argument(&mut parts)?;
+        let script_name = std::path::Path::new(script)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(script);
+
+        Some(
+            script_name
+                .trim_end_matches(".js")
+                .trim_end_matches(".mjs")
+                .trim_end_matches(".cjs")
+                .to_string(),
+        )
+    }
+
     pub fn runtime_kind(&self) -> RuntimeKind {
         let process_name = self.process_name.to_ascii_lowercase();
         let executable_name = self
@@ -86,6 +144,12 @@ impl ProcessSample {
             return self.process_name.clone();
         }
 
+        if let Some(script_name) = self.script_name_from_command_line()
+            && !script_name.trim().is_empty()
+        {
+            return script_name;
+        }
+
         self.executable_path
             .file_name()
             .and_then(|name| name.to_str())
@@ -98,6 +162,7 @@ impl ProcessSample {
             pid: self.pid,
             app_name: self.normalized_app_name(),
             executable_path: self.executable_path.clone(),
+            command_line: self.command_line.clone(),
             runtime_kind: self.runtime_kind(),
         }
     }
@@ -393,6 +458,7 @@ mod tests {
             pid: 42,
             app_name: String::new(),
             executable_path: PathBuf::from("/Applications/Example.app/Contents/MacOS/Example"),
+            command_line: None,
             runtime_kind: RuntimeKind::Electron,
         };
 
@@ -416,6 +482,7 @@ mod tests {
             pid: 7,
             process_name: "node".into(),
             executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: None,
         };
 
         assert_eq!(sample.runtime_kind(), RuntimeKind::Node);
@@ -427,6 +494,7 @@ mod tests {
             pid: 8,
             process_name: "Electron".into(),
             executable_path: PathBuf::from("/Applications/Electron.app/Contents/MacOS/Electron"),
+            command_line: None,
         };
 
         assert_eq!(sample.runtime_kind(), RuntimeKind::Electron);
@@ -438,6 +506,7 @@ mod tests {
             pid: 9,
             process_name: "python3".into(),
             executable_path: PathBuf::from("/usr/bin/python3"),
+            command_line: None,
         };
 
         assert_eq!(sample.runtime_kind(), RuntimeKind::Unknown);
@@ -451,9 +520,36 @@ mod tests {
             executable_path: PathBuf::from(
                 "/Applications/Claude Code.app/Contents/MacOS/Claude Code",
             ),
+            command_line: None,
         };
 
         assert_eq!(sample.normalized_app_name(), "Claude Code");
+    }
+
+    #[test]
+    fn process_sample_normalizes_generic_runtime_names_to_script_name_from_command_line() {
+        let sample = ProcessSample {
+            pid: 10,
+            process_name: "node".into(),
+            executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: Some(
+                "node /Users/test/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio".into(),
+            ),
+        };
+
+        assert_eq!(sample.normalized_app_name(), "yaml-language-server");
+    }
+
+    #[test]
+    fn process_sample_skips_common_node_option_value_pairs_when_finding_script_name() {
+        let sample = ProcessSample {
+            pid: 12,
+            process_name: "node".into(),
+            executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: Some("node -r ts-node/register /tmp/app.js".into()),
+        };
+
+        assert_eq!(sample.normalized_app_name(), "app");
     }
 
     #[test]
@@ -462,12 +558,17 @@ mod tests {
             pid: 11,
             process_name: "Codex".into(),
             executable_path: PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex"),
+            command_line: Some("/Applications/Codex.app/Contents/MacOS/Codex".into()),
         };
 
         let target = sample.into_target();
 
         assert_eq!(target.pid, 11);
         assert_eq!(target.app_name, "Codex");
+        assert_eq!(
+            target.command_line,
+            Some("/Applications/Codex.app/Contents/MacOS/Codex".into())
+        );
         assert_eq!(target.runtime_kind, RuntimeKind::Unknown);
     }
 
@@ -489,6 +590,7 @@ mod tests {
                 pid: 501,
                 app_name: "Codex".into(),
                 executable_path: PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex"),
+                command_line: None,
                 runtime_kind: RuntimeKind::Unknown,
             },
             status: AttachReadinessStatus::Unknown,
@@ -560,6 +662,7 @@ mod tests {
                 executable_path: PathBuf::from(
                     "/Applications/Electron.app/Contents/MacOS/Electron",
                 ),
+                command_line: None,
                 runtime_kind: RuntimeKind::Electron,
             },
             state: AttachSessionState::Attached,

@@ -380,6 +380,7 @@ mod tests {
             pid: 42,
             app_name: "Codex".into(),
             executable_path: PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex"),
+            command_line: None,
             runtime_kind: RuntimeKind::Electron,
         };
         let msg = IpcMessage::HttpRequestObserved {
@@ -465,6 +466,7 @@ mod tests {
             pid: 7,
             app_name: "Example".into(),
             executable_path: PathBuf::from("/tmp/example"),
+            command_line: None,
             runtime_kind: RuntimeKind::Node,
         };
         let msg = IpcMessage::HttpRequestObserved {
@@ -846,6 +848,7 @@ mod tests {
             pid: 42,
             app_name: "Codex".into(),
             executable_path: PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex"),
+            command_line: None,
             runtime_kind: RuntimeKind::Electron,
         }
     }

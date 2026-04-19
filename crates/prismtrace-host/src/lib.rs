@@ -437,6 +437,7 @@ mod tests {
                 pid: 101,
                 process_name: "node".into(),
                 executable_path: PathBuf::from("/usr/local/bin/node"),
+                command_line: None,
             },
             ProcessSample {
                 pid: 102,
@@ -444,11 +445,13 @@ mod tests {
                 executable_path: PathBuf::from(
                     "/Applications/Electron.app/Contents/MacOS/Electron",
                 ),
+                command_line: None,
             },
             ProcessSample {
                 pid: 103,
                 process_name: "python3".into(),
                 executable_path: PathBuf::from("/usr/bin/python3"),
+                command_line: None,
             },
         ]);
 
@@ -479,11 +482,13 @@ mod tests {
                 pid: 220,
                 process_name: "node".into(),
                 executable_path: PathBuf::from("/usr/local/bin/node"),
+                command_line: None,
             },
             ProcessSample {
                 pid: 221,
                 process_name: "python3".into(),
                 executable_path: PathBuf::from("/usr/bin/python3"),
+                command_line: None,
             },
         ]);
 
@@ -507,11 +512,13 @@ mod tests {
                 pid: 301,
                 process_name: "node".into(),
                 executable_path: PathBuf::from("/usr/local/bin/node"),
+                command_line: None,
             },
             ProcessSample {
                 pid: 302,
                 process_name: "python3".into(),
                 executable_path: PathBuf::from("/usr/bin/python3"),
+                command_line: None,
             },
         ]);
 
@@ -536,11 +543,13 @@ mod tests {
                 executable_path: PathBuf::from(
                     "/Applications/Electron.app/Contents/MacOS/Electron",
                 ),
+                command_line: None,
             },
             ProcessSample {
                 pid: 304,
                 process_name: "launchd".into(),
                 executable_path: PathBuf::from("/sbin/launchd"),
+                command_line: None,
             },
         ]);
 
@@ -563,6 +572,7 @@ mod tests {
             pid: 401,
             process_name: "Electron".into(),
             executable_path: PathBuf::from("/Applications/Electron.app/Contents/MacOS/Electron"),
+            command_line: None,
         }]);
 
         let snapshot = super::collect_attach_snapshot(
@@ -594,6 +604,7 @@ mod tests {
             pid: 402,
             process_name: "node".into(),
             executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: None,
         }]);
 
         let snapshot = super::collect_attach_snapshot(
@@ -625,6 +636,7 @@ mod tests {
             pid: 410,
             process_name: "node".into(),
             executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: None,
         }]);
         let runtime = crate::runtime::ScriptedInstrumentationRuntime::success_with_messages(vec![]);
         let mut output = Vec::new();
@@ -649,6 +661,7 @@ mod tests {
             pid: 411,
             process_name: "node".into(),
             executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: None,
         }]);
         let detach_called = Arc::new(AtomicBool::new(false));
         let runtime = TrackingRuntime::new(
@@ -697,6 +710,7 @@ mod tests {
             pid: 403,
             process_name: "node".into(),
             executable_path: PathBuf::from("/usr/local/bin/node"),
+            command_line: None,
         }]);
 
         let snapshot = super::collect_attach_snapshot(
@@ -797,6 +811,7 @@ mod tests {
                 pid: 503,
                 app_name: "TestApp".into(),
                 executable_path: PathBuf::from("/usr/bin/testapp"),
+                command_line: None,
                 runtime_kind: RuntimeKind::Node,
             },
             state: AttachSessionState::Attached,
@@ -829,6 +844,7 @@ mod tests {
                 pid: 502,
                 app_name: "TestApp".into(),
                 executable_path: PathBuf::from("/usr/bin/testapp"),
+                command_line: None,
                 runtime_kind: RuntimeKind::Node,
             },
             state: AttachSessionState::Detached,
@@ -867,6 +883,7 @@ mod tests {
                 pid,
                 app_name: format!("TestApp-{pid}"),
                 executable_path: PathBuf::from("/Applications/TestApp.app/Contents/MacOS/TestApp"),
+                command_line: None,
                 runtime_kind: RuntimeKind::Electron,
             },
             status: AttachReadinessStatus::Supported,
