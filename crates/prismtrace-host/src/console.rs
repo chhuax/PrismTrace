@@ -1,9 +1,9 @@
-use crate::discovery::{discover_targets, ProcessSampleSource, PsProcessSampleSource};
-use crate::probe_health::ProbeHealthStore;
 use crate::BootstrapResult;
+use crate::discovery::{ProcessSampleSource, PsProcessSampleSource, discover_targets};
+use crate::probe_health::ProbeHealthStore;
 use prismtrace_core::{AttachSession, ProbeHealth, ProcessTarget};
 use prismtrace_storage::StorageLayout;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
 use std::io;
 use std::io::{Read, Write};
@@ -1679,12 +1679,13 @@ fn read_request_path_from_reader(reader: &mut impl Read) -> io::Result<Option<St
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_activity_items, collect_activity_items_filtered, collect_target_summaries,
-        filter_request_summaries, load_request_detail, load_request_summaries,
-        read_request_path_from_reader, render_activity_payload_from_items, run_console_server,
-        start_console_server_on_bind_addr, write_console_response, ConsoleActivityItem,
-        ConsoleActivitySource, ConsoleKnownErrorActivity, ConsoleRecentRequestActivity,
-        ConsoleRequestSummary, ConsoleSnapshot, ConsoleTargetFilterConfig, ConsoleTargetSummary,
+        ConsoleActivityItem, ConsoleActivitySource, ConsoleKnownErrorActivity,
+        ConsoleRecentRequestActivity, ConsoleRequestSummary, ConsoleSnapshot,
+        ConsoleTargetFilterConfig, ConsoleTargetSummary, collect_activity_items,
+        collect_activity_items_filtered, collect_target_summaries, filter_request_summaries,
+        load_request_detail, load_request_summaries, read_request_path_from_reader,
+        render_activity_payload_from_items, run_console_server, start_console_server_on_bind_addr,
+        write_console_response,
     };
     use crate::bootstrap;
     use crate::discovery::StaticProcessSampleSource;
@@ -2539,8 +2540,8 @@ mod tests {
     }
 
     #[test]
-    fn write_console_response_renders_target_summary_fields_from_controlled_snapshot(
-    ) -> io::Result<()> {
+    fn write_console_response_renders_target_summary_fields_from_controlled_snapshot()
+    -> io::Result<()> {
         let snapshot = ConsoleSnapshot {
             summary: "summary".into(),
             bind_addr: "http://127.0.0.1:7799".into(),
@@ -2632,8 +2633,8 @@ mod tests {
     }
 
     #[test]
-    fn collect_target_summaries_uses_no_health_data_for_active_target_without_probe_snapshot(
-    ) -> io::Result<()> {
+    fn collect_target_summaries_uses_no_health_data_for_active_target_without_probe_snapshot()
+    -> io::Result<()> {
         let source = StaticProcessSampleSource::new(vec![ProcessSample {
             pid: 703,
             process_name: "node".into(),
