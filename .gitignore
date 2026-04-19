@@ -1,6 +1,7 @@
 /target
 /.prismtrace
 /state
+/.worktrees
 
 # Operating system files
 .DS_Store
