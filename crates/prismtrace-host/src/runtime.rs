@@ -595,6 +595,38 @@ fn parse_listener_ports(output: &str) -> Vec<u16> {
     ports
 }
 
+fn interpret_lsof_probe_result(
+    pid: u32,
+    stdout: &str,
+    stderr: &str,
+    status_code: Option<i32>,
+    success: bool,
+) -> Result<Vec<u16>, InstrumentationError> {
+    if success {
+        return Ok(parse_listener_ports(stdout));
+    }
+
+    let stderr = stderr.trim().to_string();
+    let stderr_lower = stderr.to_lowercase();
+    if stderr_lower.contains("no such process") {
+        return Err(InstrumentationError {
+            kind: InstrumentationErrorKind::ProcessNotFound,
+            message: format!("target process {pid} disappeared while probing inspector"),
+        });
+    }
+    if stderr_lower.contains("permission denied") {
+        return Err(InstrumentationError {
+            kind: InstrumentationErrorKind::PermissionDenied,
+            message: format!("permission denied while probing inspector for pid {pid}"),
+        });
+    }
+    if stderr.is_empty() && status_code == Some(1) {
+        return Ok(Vec::new());
+    }
+
+    Err(build_unexpected_lsof_error(pid, stderr, status_code))
+}
+
 fn query_listener_ports(pid: u32) -> Result<Vec<u16>, InstrumentationError> {
     let output = Command::new("lsof")
         .args(["-nP", "-a", "-p", &pid.to_string(), "-iTCP", "-sTCP:LISTEN"])
@@ -611,32 +643,15 @@ fn query_listener_ports(pid: u32) -> Result<Vec<u16>, InstrumentationError> {
             }
         })?;
 
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Ok(parse_listener_ports(&stdout));
-    }
-
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let stderr = stderr.trim().to_string();
-    let stderr_lower = stderr.to_lowercase();
-    if stderr_lower.contains("no such process") {
-        return Err(InstrumentationError {
-            kind: InstrumentationErrorKind::ProcessNotFound,
-            message: format!("target process {pid} disappeared while probing inspector"),
-        });
-    }
-    if stderr_lower.contains("permission denied") {
-        return Err(InstrumentationError {
-            kind: InstrumentationErrorKind::PermissionDenied,
-            message: format!("permission denied while probing inspector for pid {pid}"),
-        });
-    }
-
-    Err(build_unexpected_lsof_error(
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    interpret_lsof_probe_result(
         pid,
-        stderr,
+        &stdout,
+        &stderr,
         output.status.code(),
-    ))
+        output.status.success(),
+    )
 }
 
 fn parse_websocket_debugger_url(payload: &str) -> Option<String> {
@@ -1310,6 +1325,17 @@ node    42424 huaxin   23u  IPv4 0x75a73a76      0t0  TCP 127.0.0.1:9229 (LISTEN
             err.message.contains("boom"),
             "message should include stderr detail: {}",
             err.message
+        );
+    }
+
+    #[test]
+    fn lsof_probe_treats_empty_exit_one_as_no_listener_yet() {
+        let ports = super::interpret_lsof_probe_result(42424, "", "", Some(1), false)
+            .expect("empty lsof result should be treated as no listeners");
+
+        assert!(
+            ports.is_empty(),
+            "expected no listener ports, got {ports:?}"
         );
     }
 
