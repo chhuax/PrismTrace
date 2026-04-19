@@ -1,9 +1,9 @@
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Cursor, ErrorKind as IoErrorKind, Write};
-use std::net::{TcpStream, ToSocketAddrs};
-use std::os::unix::net::UnixStream;
+use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -147,12 +147,31 @@ pub struct NodeInstrumentationRuntime;
 
 #[derive(Clone)]
 struct InspectorControlHandle {
+    id: u64,
     worker: Arc<WorkerControl>,
 }
 
 fn active_controls() -> &'static Mutex<HashMap<u32, InspectorControlHandle>> {
     static CONTROLS: OnceLock<Mutex<HashMap<u32, InspectorControlHandle>>> = OnceLock::new();
     CONTROLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn next_control_id() -> u64 {
+    static NEXT_ID: OnceLock<AtomicU64> = OnceLock::new();
+    NEXT_ID
+        .get_or_init(|| AtomicU64::new(1))
+        .fetch_add(1, Ordering::Relaxed)
+}
+
+fn remove_active_control_if_matches(pid: u32, control_id: u64) {
+    if let Ok(mut controls) = active_controls().lock()
+        && controls
+            .get(&pid)
+            .map(|control| control.id == control_id)
+            .unwrap_or(false)
+    {
+        controls.remove(&pid);
+    }
 }
 
 enum WorkerCommand {
@@ -199,14 +218,26 @@ struct InspectorBridge;
 
 #[derive(Clone)]
 struct InspectorBridgeWriter {
-    sink: Arc<Mutex<UnixStream>>,
+    sink: Arc<Mutex<TcpStream>>,
 }
 
 impl InspectorBridge {
     fn create() -> Result<(InspectorBridgeWriter, Box<dyn BufRead + Send>), InstrumentationError> {
-        let (reader_side, writer_side) = UnixStream::pair().map_err(|e| InstrumentationError {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| InstrumentationError {
             kind: InstrumentationErrorKind::InjectionFailed,
             message: format!("failed to create inspector bridge: {e}"),
+        })?;
+        let addr = listener.local_addr().map_err(|e| InstrumentationError {
+            kind: InstrumentationErrorKind::InjectionFailed,
+            message: format!("failed to discover inspector bridge address: {e}"),
+        })?;
+        let writer_side = TcpStream::connect(addr).map_err(|e| InstrumentationError {
+            kind: InstrumentationErrorKind::InjectionFailed,
+            message: format!("failed to connect inspector bridge writer: {e}"),
+        })?;
+        let (reader_side, _) = listener.accept().map_err(|e| InstrumentationError {
+            kind: InstrumentationErrorKind::InjectionFailed,
+            message: format!("failed to accept inspector bridge reader: {e}"),
         })?;
         reader_side
             .set_read_timeout(Some(INSPECTOR_BRIDGE_READ_TIMEOUT))
@@ -937,10 +968,12 @@ impl InstrumentationRuntime for NodeInstrumentationRuntime {
         )?;
 
         let (command_tx, command_rx) = mpsc::channel();
+        let control_id = next_control_id();
         let worker = Arc::new(WorkerControl {
             command_tx,
             join_handle: Mutex::new(Some(thread::spawn(move || {
-                run_worker_loop(session, command_rx)
+                run_worker_loop(session, command_rx);
+                remove_active_control_if_matches(pid, control_id);
             }))),
         });
 
@@ -952,6 +985,7 @@ impl InstrumentationRuntime for NodeInstrumentationRuntime {
             controls.insert(
                 pid,
                 InspectorControlHandle {
+                    id: control_id,
                     worker: Arc::clone(&worker),
                 },
             )
@@ -999,6 +1033,7 @@ mod tests {
         NodeInstrumentationRuntime, ScriptedInstrumentationRuntime, WorkerCommand, WorkerControl,
         active_controls, build_unexpected_lsof_error, classify_signal_command_error,
         parse_listener_ports, parse_websocket_debugger_url, pick_debugger_url_from_candidates,
+        remove_active_control_if_matches,
     };
     use std::io::BufRead;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -1266,6 +1301,7 @@ node    42424 huaxin   23u  IPv4 0x75a73a76      0t0  TCP 127.0.0.1:9229 (LISTEN
         active_controls().lock().unwrap().insert(
             pid,
             super::InspectorControlHandle {
+                id: 1,
                 worker: Arc::clone(&worker),
             },
         );
@@ -1282,6 +1318,39 @@ node    42424 huaxin   23u  IPv4 0x75a73a76      0t0  TCP 127.0.0.1:9229 (LISTEN
         );
 
         cleanup_active_controls_for_tests();
+    }
+
+    #[test]
+    fn remove_active_control_if_matches_keeps_newer_replacement() {
+        let _guard = control_test_guard();
+        cleanup_active_controls_for_tests();
+
+        let pid = 42424_u32;
+        let (command_tx, _command_rx) = mpsc::channel::<WorkerCommand>();
+        let worker = Arc::new(WorkerControl {
+            command_tx,
+            join_handle: Mutex::new(None),
+        });
+
+        active_controls().lock().unwrap().insert(
+            pid,
+            super::InspectorControlHandle {
+                id: 2,
+                worker: Arc::clone(&worker),
+            },
+        );
+
+        remove_active_control_if_matches(pid, 1);
+        assert!(
+            active_controls().lock().unwrap().contains_key(&pid),
+            "mismatched cleanup should not remove newer control"
+        );
+
+        remove_active_control_if_matches(pid, 2);
+        assert!(
+            !active_controls().lock().unwrap().contains_key(&pid),
+            "matching cleanup should remove active control"
+        );
     }
 
     #[test]
