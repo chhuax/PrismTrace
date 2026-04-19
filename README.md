@@ -66,6 +66,15 @@ Start the local observability console with:
 cargo run -p prismtrace-host -- --console
 ```
 
+Limit the console to specific target identities with repeatable `--target` flags:
+
+```bash
+cargo run -p prismtrace-host -- --console --target opencode
+cargo run -p prismtrace-host -- --console --target opencode --target codex
+```
+
+When `--target` is present, the homepage and `/api/*` payloads stay in the same filtered view. If nothing matches, the console still opens and shows an explicit filtered empty state instead of falling back to the global process list.
+
 By default, PrismTrace serves the console at `http://127.0.0.1:7799`.
 
 The current bootstrap console provides:
