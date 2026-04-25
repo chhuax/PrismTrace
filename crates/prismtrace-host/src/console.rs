@@ -2562,7 +2562,9 @@ fn load_matching_response_detail(
     storage: &StorageLayout,
     exchange_id: &str,
 ) -> io::Result<Option<ConsoleResponseDetail>> {
-    Ok(build_response_detail_index(storage)?.get(exchange_id).cloned())
+    Ok(build_response_detail_index(storage)?
+        .get(exchange_id)
+        .cloned())
 }
 
 fn load_matching_tool_visibility_detail(
@@ -2770,9 +2772,10 @@ fn build_tool_visibility_detail_index(
             .map(|(captured_at_ms, _)| record.captured_at_ms >= *captured_at_ms)
             .unwrap_or(true);
         if request_should_replace {
-            index
-                .by_request_id
-                .insert(record.request_id.clone(), (record.captured_at_ms, detail.clone()));
+            index.by_request_id.insert(
+                record.request_id.clone(),
+                (record.captured_at_ms, detail.clone()),
+            );
         }
 
         if let Some(exchange_id) = &record.exchange_id {
@@ -5184,8 +5187,14 @@ mod tests {
         let handle = thread::spawn(move || server.serve_once());
         let response = send_get_request(&addr, "/api/sessions")?;
 
-        assert!(response.contains("\"active_filters\":[\"opencode\"]"), "response: {response}");
-        assert!(response.contains("\"target_display_name\":\"opencode\""), "response: {response}");
+        assert!(
+            response.contains("\"active_filters\":[\"opencode\"]"),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"target_display_name\":\"opencode\""),
+            "response: {response}"
+        );
         assert!(
             !response.contains("\"target_display_name\":\"codex\""),
             "response: {response}"
@@ -5232,9 +5241,18 @@ mod tests {
         let handle = thread::spawn(move || server.serve_once());
         let response = send_get_request(&addr, "/api/sessions/77-1714000005000-1")?;
 
-        assert!(response.starts_with("HTTP/1.1 200 OK"), "response: {response}");
-        assert!(response.contains("\"status\":\"not_found\""), "response: {response}");
-        assert!(response.contains("\"active_filters\":[\"opencode\"]"), "response: {response}");
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK"),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"status\":\"not_found\""),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"active_filters\":[\"opencode\"]"),
+            "response: {response}"
+        );
         assert!(
             !response.contains("\"target_display_name\":\"Codex\""),
             "response: {response}"
