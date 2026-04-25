@@ -4,11 +4,14 @@ use crate::probe_health::ProbeHealthStore;
 use prismtrace_core::{AttachSession, ProbeHealth, ProcessTarget};
 use prismtrace_storage::StorageLayout;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+
+const SESSION_WINDOW_MS: u64 = 5 * 60 * 1000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsoleSnapshot {
@@ -18,7 +21,9 @@ pub struct ConsoleSnapshot {
     pub target_summaries: Vec<ConsoleTargetSummary>,
     pub activity_items: Vec<ConsoleActivityItem>,
     pub request_summaries: Vec<ConsoleRequestSummary>,
+    pub session_summaries: Vec<ConsoleSessionSummary>,
     pub request_details: Vec<ConsoleRequestDetail>,
+    pub session_details: Vec<ConsoleSessionDetail>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,6 +155,35 @@ fn filter_request_summaries(
         .collect()
 }
 
+fn filter_session_summaries(
+    sessions: &[ConsoleSessionSummary],
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> Vec<ConsoleSessionSummary> {
+    let Some(filter) = filter else {
+        return sessions.to_vec();
+    };
+
+    if !filter.is_enabled() {
+        return sessions.to_vec();
+    }
+
+    sessions
+        .iter()
+        .filter(|session| {
+            let target = ProcessTarget {
+                pid: session.pid,
+                app_name: session.target_display_name.clone(),
+                executable_path: PathBuf::from(&session.target_display_name),
+                command_line: None,
+                runtime_kind: prismtrace_core::RuntimeKind::Unknown,
+            };
+
+            filter.matches_target(&target)
+        })
+        .cloned()
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsoleActivityItem {
     pub activity_id: String,
@@ -187,6 +221,48 @@ pub struct ConsoleRequestSummary {
     pub model: Option<String>,
     pub target_display_name: String,
     pub summary_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleSessionSummary {
+    pub session_id: String,
+    pub pid: u32,
+    pub target_display_name: String,
+    pub started_at_ms: u64,
+    pub completed_at_ms: u64,
+    pub exchange_count: usize,
+    pub request_count: usize,
+    pub response_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleSessionTimelineItem {
+    pub request_id: String,
+    pub exchange_id: Option<String>,
+    pub pid: u32,
+    pub target_display_name: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub started_at_ms: u64,
+    pub completed_at_ms: u64,
+    pub duration_ms: u64,
+    pub request_summary: String,
+    pub response_status: Option<u16>,
+    pub tool_count_final: usize,
+    pub has_response: bool,
+    pub has_tool_visibility: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleSessionDetail {
+    pub session_id: String,
+    pub pid: u32,
+    pub target_display_name: String,
+    pub started_at_ms: u64,
+    pub completed_at_ms: u64,
+    pub last_exchange_started_at_ms: u64,
+    pub exchange_count: usize,
+    pub timeline_items: Vec<ConsoleSessionTimelineItem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -292,6 +368,24 @@ struct ToolVisibilityArtifactRecord {
     artifact_path: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+struct ExchangeRecord {
+    request_id: String,
+    exchange_id: Option<String>,
+    pid: u32,
+    target_display_name: String,
+    provider: String,
+    model: Option<String>,
+    started_at_ms: u64,
+    completed_at_ms: u64,
+    duration_ms: u64,
+    request_summary: String,
+    response_status: Option<u16>,
+    tool_count_final: usize,
+    has_response: bool,
+    has_tool_visibility: bool,
+}
+
 pub struct ConsoleActivitySource<'a> {
     pub attach_session: Option<&'a AttachSession>,
     pub attach_occurred_at_ms: Option<u64>,
@@ -361,6 +455,10 @@ fn collect_console_snapshot_for_bind_addr(
         &load_request_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
         filter,
     );
+    let session_summaries = filter_session_summaries(
+        &load_session_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
+        filter,
+    );
     let recent_requests = load_recent_request_activity(&result.storage);
 
     ConsoleSnapshot {
@@ -381,7 +479,9 @@ fn collect_console_snapshot_for_bind_addr(
             &unmatched_targets,
         ),
         request_summaries,
+        session_summaries,
         request_details: Vec::new(),
+        session_details: Vec::new(),
     }
 }
 
@@ -454,7 +554,12 @@ pub fn start_console_server_on_bind_addr(
                 &load_request_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
                 filter,
             ),
+            session_summaries: filter_session_summaries(
+                &load_session_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
+                filter,
+            ),
             request_details: Vec::new(),
+            session_details: Vec::new(),
         },
         result: result.clone(),
         bind_addr: local_addr.to_string(),
@@ -505,6 +610,14 @@ fn write_console_response_with_storage(
                 snapshot.filter_context.as_ref(),
             ),
         ),
+        Some("/api/sessions") => (
+            "HTTP/1.1 200 OK",
+            "application/json; charset=utf-8",
+            render_sessions_payload(
+                &snapshot.session_summaries,
+                snapshot.filter_context.as_ref(),
+            ),
+        ),
         Some("/api/health") => (
             "HTTP/1.1 200 OK",
             "application/json; charset=utf-8",
@@ -524,6 +637,17 @@ fn write_console_response_with_storage(
                 }
                 .filter(|detail| request_detail_matches_filter(detail, filter));
                 render_request_detail_payload(request_id, detail, snapshot.filter_context.as_ref())
+            })
+        }
+        Some(path) if path.starts_with("/api/sessions/") => {
+            ("HTTP/1.1 200 OK", "application/json; charset=utf-8", {
+                let session_id = path.trim_start_matches("/api/sessions/");
+                let detail = match storage {
+                    Some(storage) => load_session_detail(storage, session_id).ok().flatten(),
+                    None => load_session_detail_from_snapshot(snapshot, session_id),
+                }
+                .filter(|detail| session_detail_matches_filter(detail, filter));
+                render_session_detail_payload(session_id, detail, snapshot.filter_context.as_ref())
             })
         }
         Some(_) => (
@@ -572,9 +696,17 @@ fn render_console_homepage(snapshot: &ConsoleSnapshot) -> String {
         &snapshot.request_summaries,
         snapshot.filter_context.as_ref(),
     );
+    let sessions_html = render_sessions_panel_items(
+        &snapshot.session_summaries,
+        snapshot.filter_context.as_ref(),
+    );
+    let session_timeline_html = render_session_detail_panel(snapshot.session_details.first());
     let request_detail_html = render_request_detail_panel(snapshot.request_details.first());
     let health_html = render_health_panel(&snapshot.target_summaries, &snapshot.activity_items);
-    let script = render_console_homepage_script(snapshot.request_summaries.first());
+    let script = render_console_homepage_script(
+        snapshot.session_summaries.first(),
+        snapshot.request_summaries.first(),
+    );
 
     format!(
         "<!doctype html>
@@ -827,8 +959,20 @@ fn render_console_homepage(snapshot: &ConsoleSnapshot) -> String {
           </div>
           <div class=\"console-panel-body\" id=\"requests-region\">{}</div>
         </section>
+        <section class=\"console-panel\" aria-labelledby=\"sessions-heading\">
+          <div class=\"console-panel-header\">
+            <h2 id=\"sessions-heading\">Sessions</h2>
+          </div>
+          <div class=\"console-panel-body\" id=\"sessions-region\">{}</div>
+        </section>
       </main>
       <section class=\"console-secondary-layout\">
+        <section class=\"console-panel\" aria-labelledby=\"session-detail-heading\">
+          <div class=\"console-panel-header\">
+            <h2 id=\"session-detail-heading\">Session Timeline</h2>
+          </div>
+          <div class=\"console-panel-body\" id=\"session-detail-region\">{}</div>
+        </section>
         <section class=\"console-panel\" aria-labelledby=\"request-detail-heading\">
           <div class=\"console-panel-header\">
             <h2 id=\"request-detail-heading\">Request Detail</h2>
@@ -852,6 +996,8 @@ fn render_console_homepage(snapshot: &ConsoleSnapshot) -> String {
         targets_html,
         activity_html,
         requests_html,
+        sessions_html,
+        session_timeline_html,
         request_detail_html,
         health_html,
         script
@@ -881,7 +1027,10 @@ fn render_filter_context_banner(filter_context: Option<&ConsoleFilterContext>) -
     )
 }
 
-fn render_console_homepage_script(initial_request: Option<&ConsoleRequestSummary>) -> String {
+fn render_console_homepage_script(
+    initial_session: Option<&ConsoleSessionSummary>,
+    initial_request: Option<&ConsoleRequestSummary>,
+) -> String {
     let mut script = r#"
       const escapeHtml = (value) => String(value ?? '')
         .replaceAll('&', '&amp;')
@@ -928,6 +1077,20 @@ fn render_console_homepage_script(initial_request: Option<&ConsoleRequestSummary
               <span class="console-pill">provider: ${escapeHtml(request.provider)}</span>
               <span class="console-pill">model: ${escapeHtml(request.model || 'unknown')}</span>
               <button type="button" class="console-pill" data-request-detail-trigger="${escapeHtml(request.request_id)}">view detail</button>
+            </div>
+          </article>`).join('')}</div>`;
+      };
+
+      const renderSessions = (payload) => {
+        if (!payload.sessions?.length) return renderEmptyState(payload.empty_state || '尚无会话记录');
+        return `<div class="console-list">${payload.sessions.map((session) => `
+          <article class="console-list-item" data-session-id="${escapeHtml(session.session_id)}">
+            <p class="console-list-title">${escapeHtml(session.target_display_name)}</p>
+            <p class="console-list-subtitle">PID ${escapeHtml(session.pid)} · ${escapeHtml(session.started_at_ms)} → ${escapeHtml(session.completed_at_ms)}</p>
+            <div class="console-list-meta">
+              <span class="console-pill">exchanges: ${escapeHtml(session.exchange_count)}</span>
+              <span class="console-pill">responses: ${escapeHtml(session.response_count)}</span>
+              <button type="button" class="console-pill" data-session-detail-trigger="${escapeHtml(session.session_id)}">view timeline</button>
             </div>
           </article>`).join('')}</div>`;
       };
@@ -1062,6 +1225,50 @@ fn render_console_homepage_script(initial_request: Option<&ConsoleRequestSummary
         </div>`;
       };
 
+      const renderSessionDetail = (payload) => {
+        const session = payload.session;
+        if (!session || session.status === 'not_found') {
+          return renderEmptyState(session?.detail || 'session detail is not available yet');
+        }
+
+        if (!session.timeline_items?.length) {
+          return renderEmptyState('当前 session 尚无 timeline item');
+        }
+
+        return `<div class="console-detail-grid">
+          <section class="console-detail-section">
+            <p class="console-detail-section-title">Session Overview</p>
+            <div class="console-detail-row">
+              <p class="console-detail-label">Session</p>
+              <p class="console-list-title">${escapeHtml(session.target_display_name)} · PID ${escapeHtml(session.pid)}</p>
+            </div>
+            <div class="console-detail-row">
+              <p class="console-detail-label">Window</p>
+              <p>${escapeHtml(session.started_at_ms)} → ${escapeHtml(session.completed_at_ms)}</p>
+            </div>
+            <div class="console-detail-row">
+              <p class="console-detail-label">Exchange Count</p>
+              <p>${escapeHtml(session.exchange_count)}</p>
+            </div>
+          </section>
+          <section class="console-detail-section">
+            <p class="console-detail-section-title">Timeline</p>
+            <div class="console-list">${session.timeline_items.map((item) => `
+              <article class="console-list-item">
+                <p class="console-list-title">${escapeHtml(item.request_summary)}</p>
+                <p class="console-list-subtitle">${escapeHtml(item.started_at_ms)} → ${escapeHtml(item.completed_at_ms)} · ${escapeHtml(item.target_display_name)}</p>
+                <div class="console-list-meta">
+                  <span class="console-pill">provider: ${escapeHtml(item.provider)}</span>
+                  <span class="console-pill">model: ${escapeHtml(item.model || 'unknown')}</span>
+                  <span class="console-pill">status: ${escapeHtml(item.response_status ?? 'pending')}</span>
+                  <span class="console-pill">tools: ${escapeHtml(item.tool_count_final)}</span>
+                  <button type="button" class="console-pill" data-request-detail-trigger="${escapeHtml(item.request_id)}">view request</button>
+                </div>
+              </article>`).join('')}</div>
+          </section>
+        </div>`;
+      };
+
       const renderHealth = (payload) => {
         const cards = [];
 
@@ -1108,18 +1315,45 @@ fn render_console_homepage_script(initial_request: Option<&ConsoleRequestSummary
         await refreshRegion(`/api/requests/${requestId}`, 'request-detail-region', renderRequestDetail);
       };
 
+      const refreshSessionDetail = async (sessionId) => {
+        const region = document.getElementById('session-detail-region');
+        if (!region) return;
+        if (!sessionId) {
+          region.innerHTML = renderEmptyState('请选择一个 session 查看 timeline');
+          return;
+        }
+
+        await refreshRegion(`/api/sessions/${sessionId}`, 'session-detail-region', renderSessionDetail);
+      };
+
       document.addEventListener('click', (event) => {
         const trigger = event.target.closest('[data-request-detail-trigger]');
-        if (!trigger) return;
-        void refreshRequestDetail(trigger.getAttribute('data-request-detail-trigger'));
+        if (trigger) {
+          void refreshRequestDetail(trigger.getAttribute('data-request-detail-trigger'));
+          return;
+        }
+
+        const sessionTrigger = event.target.closest('[data-session-detail-trigger]');
+        if (!sessionTrigger) return;
+        void refreshSessionDetail(sessionTrigger.getAttribute('data-session-detail-trigger'));
       });
 
       void refreshRegion("/api/targets", "targets-region", renderTargets);
       void refreshRegion("/api/activity", "activity-region", renderActivity);
       void refreshRegion("/api/requests", "requests-region", renderRequests);
+      void refreshRegion("/api/sessions", "sessions-region", renderSessions);
       void refreshRegion("/api/health", "health-region", renderHealth);
     "#
     .to_string();
+
+    if let Some(session) = initial_session {
+        script.push_str(&format!(
+            "\n      void refreshSessionDetail(\"{}\");\n",
+            escape_html(&session.session_id)
+        ));
+    } else {
+        script.push_str("\n      void refreshSessionDetail(null);\n");
+    }
 
     if let Some(request) = initial_request {
         script.push_str(&format!(
@@ -1212,6 +1446,38 @@ fn render_requests_panel_items(
                 escape_html(&request.provider),
                 escape_html(request.model.as_deref().unwrap_or("unknown")),
                 escape_html(&request.request_id)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    format!("<div class=\"console-list\">{items}</div>")
+}
+
+fn render_sessions_panel_items(
+    sessions: &[ConsoleSessionSummary],
+    filter_context: Option<&ConsoleFilterContext>,
+) -> String {
+    if sessions.is_empty() {
+        return render_console_empty_state(&filtered_empty_state_message(
+            filter_context,
+            "尚无会话记录",
+        ));
+    }
+
+    let items = sessions
+        .iter()
+        .map(|session| {
+            format!(
+                "<article class=\"console-list-item\" data-session-id=\"{}\"><p class=\"console-list-title\">{}</p><p class=\"console-list-subtitle\">PID {} · {} → {}</p><div class=\"console-list-meta\"><span class=\"console-pill\">exchanges: {}</span><span class=\"console-pill\">responses: {}</span><button type=\"button\" class=\"console-pill\" data-session-detail-trigger=\"{}\">view timeline</button></div></article>",
+                escape_html(&session.session_id),
+                escape_html(&session.target_display_name),
+                session.pid,
+                session.started_at_ms,
+                session.completed_at_ms,
+                session.exchange_count,
+                session.response_count,
+                escape_html(&session.session_id)
             )
         })
         .collect::<Vec<_>>()
@@ -1407,6 +1673,49 @@ fn render_request_detail_panel(detail: Option<&ConsoleRequestDetail>) -> String 
                 .unwrap_or_else(|| render_console_empty_state("尚未关联到 response artifact"))
         ),
         None => render_console_empty_state("请选择一条 request 查看基础详情"),
+    }
+}
+
+fn render_session_detail_panel(detail: Option<&ConsoleSessionDetail>) -> String {
+    match detail {
+        Some(detail) => {
+            let items = detail
+                .timeline_items
+                .iter()
+                .map(|item| {
+                    format!(
+                        "<article class=\"console-list-item\"><p class=\"console-list-title\">{}</p><p class=\"console-list-subtitle\">{} → {} · {}</p><div class=\"console-list-meta\"><span class=\"console-pill\">provider: {}</span><span class=\"console-pill\">model: {}</span><span class=\"console-pill\">status: {}</span><span class=\"console-pill\">tools: {}</span><button type=\"button\" class=\"console-pill\" data-request-detail-trigger=\"{}\">view request</button></div></article>",
+                        escape_html(&item.request_summary),
+                        item.started_at_ms,
+                        item.completed_at_ms,
+                        escape_html(&item.target_display_name),
+                        escape_html(&item.provider),
+                        escape_html(item.model.as_deref().unwrap_or("unknown")),
+                        item.response_status
+                            .map(|status| status.to_string())
+                            .unwrap_or_else(|| "pending".to_string()),
+                        item.tool_count_final,
+                        escape_html(&item.request_id)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("");
+
+            format!(
+                "<div class=\"console-detail-grid\"><section class=\"console-detail-section\"><p class=\"console-detail-section-title\">Session Overview</p><div class=\"console-detail-row\"><p class=\"console-detail-label\">Session</p><p class=\"console-list-title\">{} · PID {}</p></div><div class=\"console-detail-row\"><p class=\"console-detail-label\">Window</p><p>{} → {}</p></div><div class=\"console-detail-row\"><p class=\"console-detail-label\">Exchange Count</p><p>{}</p></div></section><section class=\"console-detail-section\"><p class=\"console-detail-section-title\">Timeline</p>{}</section></div>",
+                escape_html(&detail.target_display_name),
+                detail.pid,
+                detail.started_at_ms,
+                detail.completed_at_ms,
+                detail.exchange_count,
+                if items.is_empty() {
+                    render_console_empty_state("当前 session 尚无 timeline item")
+                } else {
+                    format!("<div class=\"console-list\">{items}</div>")
+                }
+            )
+        }
+        None => render_console_empty_state("请选择一个 session 查看 timeline"),
     }
 }
 
@@ -1913,6 +2222,193 @@ pub fn load_request_detail(
     Ok(None)
 }
 
+pub fn load_session_summaries(storage: &StorageLayout) -> io::Result<Vec<ConsoleSessionSummary>> {
+    let sessions = load_session_details(storage)?;
+
+    Ok(sessions
+        .into_iter()
+        .map(|detail| ConsoleSessionSummary {
+            session_id: detail.session_id,
+            pid: detail.pid,
+            target_display_name: detail.target_display_name,
+            started_at_ms: detail.started_at_ms,
+            completed_at_ms: detail.completed_at_ms,
+            exchange_count: detail.exchange_count,
+            request_count: detail.exchange_count,
+            response_count: detail
+                .timeline_items
+                .iter()
+                .filter(|item| item.has_response)
+                .count(),
+        })
+        .collect())
+}
+
+pub fn load_session_detail(
+    storage: &StorageLayout,
+    session_id: &str,
+) -> io::Result<Option<ConsoleSessionDetail>> {
+    Ok(load_session_details(storage)?
+        .into_iter()
+        .find(|detail| detail.session_id == session_id))
+}
+
+fn load_session_details(storage: &StorageLayout) -> io::Result<Vec<ConsoleSessionDetail>> {
+    let exchanges = load_exchange_records(storage)?;
+    Ok(build_session_details(exchanges))
+}
+
+fn load_exchange_records(storage: &StorageLayout) -> io::Result<Vec<ExchangeRecord>> {
+    let mut exchanges = load_request_records(storage)?
+        .into_iter()
+        .filter_map(|record| {
+            let pid = record.pid?;
+            let request_summary = format!(
+                "{} {} {}",
+                record.provider,
+                record.method,
+                request_path_only(&record.url)
+            );
+            let response = record
+                .exchange_id
+                .as_deref()
+                .and_then(|exchange_id| load_matching_response_detail(storage, exchange_id).ok())
+                .flatten();
+            let tool_visibility = load_matching_tool_visibility_detail(
+                storage,
+                &record.request_id,
+                record.exchange_id.as_deref(),
+            )
+            .ok()
+            .flatten();
+
+            let completed_at_ms = response
+                .as_ref()
+                .map(|detail| detail.completed_at_ms)
+                .unwrap_or(record.captured_at_ms);
+            let duration_ms = response
+                .as_ref()
+                .map(|detail| detail.duration_ms)
+                .unwrap_or_default();
+            let response_status = response.as_ref().map(|detail| detail.status_code);
+            let tool_count_final = tool_visibility
+                .as_ref()
+                .map(|detail| detail.tool_count_final)
+                .unwrap_or_default();
+
+            Some(ExchangeRecord {
+                request_id: record.request_id,
+                exchange_id: record.exchange_id,
+                pid,
+                target_display_name: record.target_display_name,
+                provider: record.provider,
+                model: record.model,
+                started_at_ms: record.captured_at_ms,
+                completed_at_ms,
+                duration_ms,
+                request_summary,
+                response_status,
+                tool_count_final,
+                has_response: response.is_some(),
+                has_tool_visibility: tool_visibility.is_some(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    exchanges.sort_by(|left, right| {
+        left.started_at_ms
+            .cmp(&right.started_at_ms)
+            .then_with(|| left.request_id.cmp(&right.request_id))
+    });
+
+    Ok(exchanges)
+}
+
+fn build_session_details(exchanges: Vec<ExchangeRecord>) -> Vec<ConsoleSessionDetail> {
+    let mut sessions = Vec::new();
+    let mut exchanges_by_pid = BTreeMap::<u32, Vec<ExchangeRecord>>::new();
+
+    for exchange in exchanges {
+        exchanges_by_pid
+            .entry(exchange.pid)
+            .or_default()
+            .push(exchange);
+    }
+
+    for (pid, mut pid_exchanges) in exchanges_by_pid {
+        pid_exchanges.sort_by(|left, right| {
+            left.started_at_ms
+                .cmp(&right.started_at_ms)
+                .then_with(|| left.request_id.cmp(&right.request_id))
+        });
+
+        let mut current: Option<ConsoleSessionDetail> = None;
+        let mut ordinal = 0_usize;
+
+        for exchange in pid_exchanges {
+            let should_start_new = current.as_ref().is_none_or(|session| {
+                exchange
+                    .started_at_ms
+                    .saturating_sub(session.last_exchange_started_at_ms)
+                    > SESSION_WINDOW_MS
+            });
+
+            if should_start_new {
+                if let Some(session) = current.take() {
+                    sessions.push(session);
+                }
+
+                ordinal += 1;
+                current = Some(ConsoleSessionDetail {
+                    session_id: format!("{pid}-{}-{ordinal}", exchange.started_at_ms),
+                    pid,
+                    target_display_name: exchange.target_display_name.clone(),
+                    started_at_ms: exchange.started_at_ms,
+                    completed_at_ms: exchange.completed_at_ms,
+                    last_exchange_started_at_ms: exchange.started_at_ms,
+                    exchange_count: 0,
+                    timeline_items: Vec::new(),
+                });
+            }
+
+            if let Some(session) = current.as_mut() {
+                session.completed_at_ms = session.completed_at_ms.max(exchange.completed_at_ms);
+                session.last_exchange_started_at_ms = exchange.started_at_ms;
+                session.exchange_count += 1;
+                session.timeline_items.push(ConsoleSessionTimelineItem {
+                    request_id: exchange.request_id,
+                    exchange_id: exchange.exchange_id,
+                    pid,
+                    target_display_name: exchange.target_display_name,
+                    provider: exchange.provider,
+                    model: exchange.model,
+                    started_at_ms: exchange.started_at_ms,
+                    completed_at_ms: exchange.completed_at_ms,
+                    duration_ms: exchange.duration_ms,
+                    request_summary: exchange.request_summary,
+                    response_status: exchange.response_status,
+                    tool_count_final: exchange.tool_count_final,
+                    has_response: exchange.has_response,
+                    has_tool_visibility: exchange.has_tool_visibility,
+                });
+            }
+        }
+
+        if let Some(session) = current {
+            sessions.push(session);
+        }
+    }
+
+    sessions.sort_by(|left, right| {
+        right
+            .completed_at_ms
+            .cmp(&left.completed_at_ms)
+            .then_with(|| left.session_id.cmp(&right.session_id))
+    });
+
+    sessions
+}
+
 fn load_request_records(storage: &StorageLayout) -> io::Result<Vec<RequestArtifactRecord>> {
     let requests_dir = storage.artifacts_dir.join("requests");
     if !requests_dir.exists() {
@@ -2316,6 +2812,25 @@ fn request_detail_matches_filter(
     filter.matches_target(&target)
 }
 
+fn session_detail_matches_filter(
+    detail: &ConsoleSessionDetail,
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> bool {
+    let Some(filter) = filter else {
+        return true;
+    };
+
+    let target = ProcessTarget {
+        pid: detail.pid,
+        app_name: detail.target_display_name.clone(),
+        executable_path: PathBuf::from(&detail.target_display_name),
+        command_line: None,
+        runtime_kind: prismtrace_core::RuntimeKind::Unknown,
+    };
+
+    filter.matches_target(&target)
+}
+
 fn extract_model_from_body_text(body_text: &str) -> Option<String> {
     let value: Value = serde_json::from_str(body_text).ok()?;
     value
@@ -2345,6 +2860,34 @@ fn render_requests_payload(
     let mut payload = json!({
         "requests": requests,
         "empty_state": if requests.is_empty() { Some(filtered_empty_state_message(filter_context, "尚无请求记录")) } else { None::<String> }
+    });
+    append_filter_context_fields(&mut payload, filter_context);
+    payload.to_string()
+}
+
+fn render_sessions_payload(
+    sessions: &[ConsoleSessionSummary],
+    filter_context: Option<&ConsoleFilterContext>,
+) -> String {
+    let sessions = sessions
+        .iter()
+        .map(|session| {
+            json!({
+                "session_id": session.session_id,
+                "pid": session.pid,
+                "target_display_name": session.target_display_name,
+                "started_at_ms": session.started_at_ms,
+                "completed_at_ms": session.completed_at_ms,
+                "exchange_count": session.exchange_count,
+                "request_count": session.request_count,
+                "response_count": session.response_count,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let mut payload = json!({
+        "sessions": sessions,
+        "empty_state": if sessions.is_empty() { Some(filtered_empty_state_message(filter_context, "尚无会话记录")) } else { None::<String> }
     });
     append_filter_context_fields(&mut payload, filter_context);
     payload.to_string()
@@ -2436,6 +2979,60 @@ fn render_request_detail_payload(
     payload.to_string()
 }
 
+fn render_session_detail_payload(
+    session_id: &str,
+    detail: Option<ConsoleSessionDetail>,
+    filter_context: Option<&ConsoleFilterContext>,
+) -> String {
+    let mut payload = match detail {
+        Some(detail) => {
+            let timeline_items = detail
+                .timeline_items
+                .iter()
+                .map(|item| {
+                    json!({
+                        "request_id": item.request_id,
+                        "exchange_id": item.exchange_id,
+                        "pid": item.pid,
+                        "target_display_name": item.target_display_name,
+                        "provider": item.provider,
+                        "model": item.model,
+                        "started_at_ms": item.started_at_ms,
+                        "completed_at_ms": item.completed_at_ms,
+                        "duration_ms": item.duration_ms,
+                        "request_summary": item.request_summary,
+                        "response_status": item.response_status,
+                        "tool_count_final": item.tool_count_final,
+                        "has_response": item.has_response,
+                        "has_tool_visibility": item.has_tool_visibility,
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            json!({
+                "session": {
+                    "session_id": detail.session_id,
+                    "pid": detail.pid,
+                    "target_display_name": detail.target_display_name,
+                    "started_at_ms": detail.started_at_ms,
+                    "completed_at_ms": detail.completed_at_ms,
+                    "exchange_count": detail.exchange_count,
+                    "timeline_items": timeline_items,
+                }
+            })
+        }
+        None => json!({
+            "session": {
+                "session_id": session_id,
+                "status": "not_found",
+                "detail": "session detail is not available yet"
+            }
+        }),
+    };
+    append_filter_context_fields(&mut payload, filter_context);
+    payload.to_string()
+}
+
 fn load_request_detail_from_snapshot(
     snapshot: &ConsoleSnapshot,
     request_id: &str,
@@ -2449,6 +3046,17 @@ fn load_request_detail_from_snapshot(
     }
 
     None
+}
+
+fn load_session_detail_from_snapshot(
+    snapshot: &ConsoleSnapshot,
+    session_id: &str,
+) -> Option<ConsoleSessionDetail> {
+    snapshot
+        .session_details
+        .iter()
+        .find(|detail| detail.session_id == session_id)
+        .cloned()
 }
 
 fn append_filter_context_fields(
@@ -2492,9 +3100,9 @@ mod tests {
         ConsoleRecentRequestActivity, ConsoleRequestSummary, ConsoleSnapshot,
         ConsoleTargetFilterConfig, ConsoleTargetSummary, collect_activity_items,
         collect_activity_items_filtered, collect_target_summaries, filter_request_summaries,
-        load_request_detail, load_request_summaries, read_request_path_from_reader,
-        render_activity_payload_from_items, run_console_server, start_console_server_on_bind_addr,
-        write_console_response,
+        load_request_detail, load_request_summaries, load_session_detail, load_session_summaries,
+        read_request_path_from_reader, render_activity_payload_from_items, run_console_server,
+        start_console_server_on_bind_addr, write_console_response,
     };
     use crate::bootstrap;
     use crate::discovery::StaticProcessSampleSource;
@@ -2754,7 +3362,9 @@ mod tests {
             target_summaries: vec![],
             activity_items: vec![],
             request_summaries: vec![],
+            session_summaries: vec![],
             request_details: vec![],
+            session_details: vec![],
         });
 
         assert!(
@@ -2774,7 +3384,9 @@ mod tests {
             target_summaries: vec![],
             activity_items: vec![],
             request_summaries: vec![],
+            session_summaries: vec![],
             request_details: vec![],
+            session_details: vec![],
         });
 
         assert!(
@@ -2871,7 +3483,9 @@ mod tests {
             target_summaries: vec![],
             activity_items: vec![],
             request_summaries: vec![],
+            session_summaries: vec![],
             request_details: vec![],
+            session_details: vec![],
         });
 
         assert!(
@@ -2953,7 +3567,9 @@ mod tests {
             target_summaries: vec![],
             activity_items: vec![],
             request_summaries: vec![],
+            session_summaries: vec![],
             request_details: vec![],
+            session_details: vec![],
         });
 
         assert!(
@@ -3023,7 +3639,9 @@ mod tests {
                 target_display_name: "Codex".into(),
                 summary_text: "openai POST /v1/responses".into(),
             }],
+            session_summaries: vec![],
             request_details: vec![],
+            session_details: vec![],
         });
 
         assert!(homepage.contains("Codex"), "homepage: {homepage}");
@@ -3073,6 +3691,7 @@ mod tests {
                 target_display_name: "Codex".into(),
                 summary_text: "openai POST /v1/responses".into(),
             }],
+            session_summaries: vec![],
             request_details: vec![super::ConsoleRequestDetail {
                 request_id: "req-1".into(),
                 exchange_id: Some("ex-1".into()),
@@ -3120,6 +3739,7 @@ mod tests {
                     duration_ms: 2,
                 }),
             }],
+            session_details: vec![],
         });
 
         assert!(homepage.contains("Request Detail"), "homepage: {homepage}");
@@ -3165,7 +3785,9 @@ mod tests {
                 related_request_id: None,
             }],
             request_summaries: vec![],
+            session_summaries: vec![],
             request_details: vec![],
+            session_details: vec![],
         });
 
         assert!(homepage.contains("probe: attached"), "homepage: {homepage}");
@@ -3250,7 +3872,9 @@ mod tests {
                 related_request_id: None,
             }],
             request_summaries: vec![],
+            session_summaries: vec![],
             request_details: vec![],
+            session_details: vec![],
         };
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let addr = listener.local_addr()?;
@@ -3319,7 +3943,9 @@ mod tests {
             target_summaries: vec![],
             activity_items: vec![],
             request_summaries: vec![],
+            session_summaries: vec![],
             request_details: vec![],
+            session_details: vec![],
         };
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let addr = listener.local_addr()?;
@@ -3357,7 +3983,9 @@ mod tests {
             target_summaries: vec![],
             activity_items: vec![],
             request_summaries: vec![],
+            session_summaries: vec![],
             request_details: vec![],
+            session_details: vec![],
         };
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let addr = listener.local_addr()?;
@@ -3402,7 +4030,9 @@ mod tests {
             }],
             activity_items: vec![],
             request_summaries: vec![],
+            session_summaries: vec![],
             request_details: vec![],
+            session_details: vec![],
         };
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let addr = listener.local_addr()?;
@@ -3596,7 +4226,9 @@ mod tests {
                 related_request_id: None,
             }],
             request_summaries: vec![],
+            session_summaries: vec![],
             request_details: vec![],
+            session_details: vec![],
         };
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let addr = listener.local_addr()?;
@@ -3778,6 +4410,209 @@ mod tests {
         assert_eq!(summaries[0].model.as_deref(), Some("gpt-4.1"));
         assert_eq!(summaries[0].target_display_name, "Codex");
         assert!(summaries[0].summary_text.contains("POST /v1/responses"));
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn load_session_summaries_groups_same_pid_even_with_interleaved_other_pid() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let requests_dir = result.storage.artifacts_dir.join("requests");
+        fs::create_dir_all(&requests_dir)?;
+        fs::write(
+            requests_dir.join("1714000001000-10-1.json"),
+            serde_json::json!({
+                "event_id": "10-1714000001000-1",
+                "exchange_id": "ex-10-1",
+                "pid": 10,
+                "target_display_name": "Codex",
+                "provider_hint": "openai",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.openai.com/v1/responses",
+                "body_text": "{\"model\":\"gpt-4.1\"}",
+                "body_size_bytes": 19,
+                "truncated": false,
+                "captured_at_ms": 1714000001000u64,
+            })
+            .to_string(),
+        )?;
+        fs::write(
+            requests_dir.join("1714000002000-20-1.json"),
+            serde_json::json!({
+                "event_id": "20-1714000002000-1",
+                "exchange_id": "ex-20-1",
+                "pid": 20,
+                "target_display_name": "Claude",
+                "provider_hint": "anthropic",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.anthropic.com/v1/messages",
+                "body_text": "{\"model\":\"claude-3-7-sonnet\"}",
+                "body_size_bytes": 30,
+                "truncated": false,
+                "captured_at_ms": 1714000002000u64,
+            })
+            .to_string(),
+        )?;
+        fs::write(
+            requests_dir.join("1714000003000-10-2.json"),
+            serde_json::json!({
+                "event_id": "10-1714000003000-2",
+                "exchange_id": "ex-10-2",
+                "pid": 10,
+                "target_display_name": "Codex",
+                "provider_hint": "openai",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.openai.com/v1/responses",
+                "body_text": "{\"model\":\"gpt-4.1\"}",
+                "body_size_bytes": 19,
+                "truncated": false,
+                "captured_at_ms": 1714000003000u64,
+            })
+            .to_string(),
+        )?;
+
+        let sessions = load_session_summaries(&result.storage)?;
+
+        assert_eq!(sessions.len(), 2);
+        let codex = sessions
+            .iter()
+            .find(|session| session.pid == 10)
+            .expect("codex session should exist");
+        assert_eq!(codex.exchange_count, 2);
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn load_session_detail_splits_same_pid_after_time_window() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let requests_dir = result.storage.artifacts_dir.join("requests");
+        fs::create_dir_all(&requests_dir)?;
+        fs::write(
+            requests_dir.join("1714000001000-10-1.json"),
+            serde_json::json!({
+                "event_id": "10-1714000001000-1",
+                "exchange_id": "ex-10-1",
+                "pid": 10,
+                "target_display_name": "Codex",
+                "provider_hint": "openai",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.openai.com/v1/responses",
+                "body_text": "{\"model\":\"gpt-4.1\"}",
+                "body_size_bytes": 19,
+                "truncated": false,
+                "captured_at_ms": 1714000001000u64,
+            })
+            .to_string(),
+        )?;
+        fs::write(
+            requests_dir.join("1714000301001-10-2.json"),
+            serde_json::json!({
+                "event_id": "10-1714000301001-2",
+                "exchange_id": "ex-10-2",
+                "pid": 10,
+                "target_display_name": "Codex",
+                "provider_hint": "openai",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.openai.com/v1/responses",
+                "body_text": "{\"model\":\"gpt-4.1\"}",
+                "body_size_bytes": 19,
+                "truncated": false,
+                "captured_at_ms": 1714000301001u64,
+            })
+            .to_string(),
+        )?;
+
+        let sessions = load_session_summaries(&result.storage)?;
+
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.iter().all(|session| session.exchange_count == 1));
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn load_session_summaries_do_not_merge_when_only_response_finishes_within_window()
+    -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let requests_dir = result.storage.artifacts_dir.join("requests");
+        let responses_dir = result.storage.artifacts_dir.join("responses");
+        fs::create_dir_all(&requests_dir)?;
+        fs::create_dir_all(&responses_dir)?;
+        fs::write(
+            requests_dir.join("1714000001000-10-1.json"),
+            serde_json::json!({
+                "event_id": "10-1714000001000-1",
+                "exchange_id": "ex-10-1",
+                "pid": 10,
+                "target_display_name": "Codex",
+                "provider_hint": "openai",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.openai.com/v1/responses",
+                "body_text": "{\"model\":\"gpt-4.1\"}",
+                "body_size_bytes": 19,
+                "truncated": false,
+                "captured_at_ms": 1714000001000u64,
+            })
+            .to_string(),
+        )?;
+        fs::write(
+            responses_dir.join("1714000360000-10-2.json"),
+            serde_json::json!({
+                "event_id": "10-1714000360000-2",
+                "exchange_id": "ex-10-1",
+                "pid": 10,
+                "target_display_name": "Codex",
+                "provider_hint": "openai",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.openai.com/v1/responses",
+                "status_code": 200,
+                "headers": [],
+                "body_text": "{\"output\":[]}",
+                "body_size_bytes": 13,
+                "truncated": false,
+                "started_at_ms": 1714000002000u64,
+                "completed_at_ms": 1714000360000u64,
+                "duration_ms": 359000u64
+            })
+            .to_string(),
+        )?;
+        fs::write(
+            requests_dir.join("1714000361000-10-3.json"),
+            serde_json::json!({
+                "event_id": "10-1714000361000-3",
+                "exchange_id": "ex-10-2",
+                "pid": 10,
+                "target_display_name": "Codex",
+                "provider_hint": "openai",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.openai.com/v1/responses",
+                "body_text": "{\"model\":\"gpt-4.1\"}",
+                "body_size_bytes": 19,
+                "truncated": false,
+                "captured_at_ms": 1714000361000u64,
+            })
+            .to_string(),
+        )?;
+
+        let sessions = load_session_summaries(&result.storage)?;
+
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.iter().all(|session| session.exchange_count == 1));
 
         fs::remove_dir_all(result.config.state_root)?;
         Ok(())
@@ -4121,6 +4956,117 @@ mod tests {
     }
 
     #[test]
+    fn console_server_returns_session_detail_api_payload() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let requests_dir = result.storage.artifacts_dir.join("requests");
+        fs::create_dir_all(&requests_dir)?;
+        fs::write(
+            requests_dir.join("1714000005000-77-1.json"),
+            serde_json::json!({
+                "event_id": "demo-request",
+                "exchange_id": "ex-demo",
+                "pid": 77,
+                "target_display_name": "NodeApp",
+                "provider_hint": "anthropic",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.anthropic.com/v1/messages",
+                "headers": [],
+                "body_text": "{\"model\":\"claude-3-7-sonnet\",\"messages\":[]}",
+                "body_size_bytes": 48,
+                "truncated": false,
+                "captured_at_ms": 1714000005000u64,
+            })
+            .to_string(),
+        )?;
+        let responses_dir = result.storage.artifacts_dir.join("responses");
+        fs::create_dir_all(&responses_dir)?;
+        fs::write(
+            responses_dir.join("1714000005100-77-2.json"),
+            serde_json::json!({
+                "event_id": "demo-response",
+                "exchange_id": "ex-demo",
+                "pid": 77,
+                "target_display_name": "NodeApp",
+                "provider_hint": "anthropic",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.anthropic.com/v1/messages",
+                "status_code": 200,
+                "headers": [],
+                "body_text": "{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}",
+                "body_size_bytes": 42,
+                "truncated": false,
+                "started_at_ms": 1714000005050u64,
+                "completed_at_ms": 1714000005100u64,
+                "duration_ms": 50u64
+            })
+            .to_string(),
+        )?;
+        let tool_visibility_dir = result.storage.artifacts_dir.join("tool_visibility");
+        fs::create_dir_all(&tool_visibility_dir)?;
+        fs::write(
+            tool_visibility_dir.join("1714000005000-77-1.json"),
+            serde_json::json!({
+                "request_id": "demo-request",
+                "exchange_id": "ex-demo",
+                "captured_at_ms": 1714000005000u64,
+                "visibility_stage": "request-embedded",
+                "tool_choice": "auto",
+                "final_tools_json": [
+                    {
+                        "type": "function",
+                        "function": { "name": "list_files" }
+                    }
+                ],
+                "tool_count_final": 1
+            })
+            .to_string(),
+        )?;
+
+        let detail = load_session_detail(&result.storage, "77-1714000005000-1")?
+            .expect("session detail should exist");
+        assert_eq!(detail.exchange_count, 1);
+
+        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+        let addr = server
+            .local_url()?
+            .trim_start_matches("http://")
+            .to_string();
+
+        let handle = thread::spawn(move || server.serve_once());
+
+        let response = send_get_request(&addr, "/api/sessions/77-1714000005000-1")?;
+
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK"),
+            "response: {response}"
+        );
+        assert!(response.contains("\"session\""), "response: {response}");
+        assert!(
+            response.contains("\"session_id\":\"77-1714000005000-1\""),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"request_id\":\"demo-request\""),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"response_status\":200"),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"tool_count_final\":1"),
+            "response: {response}"
+        );
+
+        handle.join().expect("server thread should join")?;
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
     fn console_server_filtered_request_detail_does_not_leak_unmatched_request() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
@@ -4188,7 +5134,9 @@ mod tests {
             target_summaries: vec![],
             activity_items: vec![],
             request_summaries: vec![],
+            session_summaries: vec![],
             request_details: vec![],
+            session_details: vec![],
         };
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let addr = listener.local_addr()?;
