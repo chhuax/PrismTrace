@@ -190,27 +190,105 @@ pub struct ConsoleRequestSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleHeaderDetail {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleResponseDetail {
+    pub artifact_path: String,
+    pub status_code: u16,
+    pub headers: Vec<ConsoleHeaderDetail>,
+    pub body_text: Option<String>,
+    pub body_size_bytes: usize,
+    pub truncated: bool,
+    pub started_at_ms: u64,
+    pub completed_at_ms: u64,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleToolSummary {
+    pub name: String,
+    pub tool_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleToolVisibilityDetail {
+    pub artifact_path: String,
+    pub visibility_stage: String,
+    pub tool_choice: Option<String>,
+    pub tool_count_final: usize,
+    pub final_tools: Vec<ConsoleToolSummary>,
+    pub final_tools_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsoleRequestDetail {
     pub request_id: String,
+    pub exchange_id: Option<String>,
     pub captured_at_ms: u64,
     pub provider: String,
     pub model: Option<String>,
     pub target_display_name: String,
     pub artifact_path: String,
     pub request_summary: String,
+    pub hook_name: String,
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<ConsoleHeaderDetail>,
+    pub body_text: Option<String>,
+    pub body_size_bytes: usize,
+    pub truncated: bool,
     pub probe_context: Option<String>,
+    pub tool_visibility: Option<ConsoleToolVisibilityDetail>,
+    pub response: Option<ConsoleResponseDetail>,
 }
 
 #[derive(Debug, Clone)]
 struct RequestArtifactRecord {
     request_id: String,
+    exchange_id: Option<String>,
     pid: Option<u32>,
     captured_at_ms: u64,
     provider: String,
     model: Option<String>,
     target_display_name: String,
+    hook_name: String,
     method: String,
     url: String,
+    headers: Vec<ConsoleHeaderDetail>,
+    body_text: Option<String>,
+    body_size_bytes: usize,
+    truncated: bool,
+    artifact_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct ResponseArtifactRecord {
+    exchange_id: String,
+    status_code: u16,
+    headers: Vec<ConsoleHeaderDetail>,
+    body_text: Option<String>,
+    body_size_bytes: usize,
+    truncated: bool,
+    started_at_ms: u64,
+    completed_at_ms: u64,
+    duration_ms: u64,
+    artifact_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct ToolVisibilityArtifactRecord {
+    request_id: String,
+    exchange_id: Option<String>,
+    captured_at_ms: u64,
+    visibility_stage: String,
+    tool_choice: Option<String>,
+    tool_count_final: usize,
+    final_tools: Vec<ConsoleToolSummary>,
+    final_tools_json: String,
     artifact_path: PathBuf,
 }
 
@@ -386,13 +464,14 @@ pub fn start_console_server_on_bind_addr(
 
 #[cfg(test)]
 fn write_console_response(stream: &mut TcpStream, snapshot: &ConsoleSnapshot) -> io::Result<()> {
-    write_console_response_with_storage(stream, snapshot, None)
+    write_console_response_with_storage(stream, snapshot, None, None)
 }
 
 fn write_console_response_with_storage(
     stream: &mut TcpStream,
     snapshot: &ConsoleSnapshot,
     storage: Option<&StorageLayout>,
+    filter: Option<&ConsoleTargetFilterConfig>,
 ) -> io::Result<()> {
     let request_path = read_request_path(stream)?;
     let (status_line, content_type, body) = match request_path.as_deref() {
@@ -442,7 +521,8 @@ fn write_console_response_with_storage(
                 let detail = match storage {
                     Some(storage) => load_request_detail(storage, request_id).ok().flatten(),
                     None => load_request_detail_from_snapshot(snapshot, request_id),
-                };
+                }
+                .filter(|detail| request_detail_matches_filter(detail, filter));
                 render_request_detail_payload(request_id, detail, snapshot.filter_context.as_ref())
             })
         }
@@ -475,7 +555,7 @@ fn write_live_console_response(
     filter: Option<&ConsoleTargetFilterConfig>,
 ) -> io::Result<()> {
     let snapshot = collect_console_snapshot_for_bind_addr(result, bind_addr, filter);
-    write_console_response_with_storage(stream, &snapshot, Some(&result.storage))
+    write_console_response_with_storage(stream, &snapshot, Some(&result.storage), filter)
 }
 
 fn read_request_path(stream: &mut TcpStream) -> io::Result<Option<String>> {
@@ -641,6 +721,34 @@ fn render_console_homepage(snapshot: &ConsoleSnapshot) -> String {
         font-size: 12px;
         text-transform: uppercase;
         letter-spacing: 0.08em;
+      }}
+      .console-detail-section {{
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+        border: 1px solid #23385c;
+        border-radius: 16px;
+        background: rgba(9, 15, 28, 0.82);
+      }}
+      .console-detail-section-title {{
+        margin: 0;
+        font-size: 14px;
+        font-weight: 700;
+        color: #f4f8ff;
+      }}
+      .console-code-block {{
+        margin: 0;
+        padding: 12px 14px;
+        border: 1px solid #1f2f4d;
+        border-radius: 12px;
+        background: rgba(6, 11, 20, 0.92);
+        color: #d9e7ff;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        line-height: 1.55;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
       }}
       .console-health-stack {{ display: grid; gap: 12px; }}
       .console-health-card {{
@@ -824,33 +932,133 @@ fn render_console_homepage_script(initial_request: Option<&ConsoleRequestSummary
           </article>`).join('')}</div>`;
       };
 
+      const renderHeaderList = (headers, emptyText) => {
+        if (!headers?.length) return renderEmptyState(emptyText);
+        return `<div class="console-list">${headers.map((header) => `
+          <article class="console-list-item">
+            <p class="console-list-title">${escapeHtml(header.name)}</p>
+            <p class="console-list-subtitle"><code>${escapeHtml(header.value)}</code></p>
+          </article>`).join('')}</div>`;
+      };
+
+      const renderBodyBlock = (bodyText, truncated, emptyText) => {
+        if (!bodyText) return renderEmptyState(emptyText);
+        const truncatedLabel = truncated
+          ? '<p class="console-detail-label">captured body is truncated</p>'
+          : '';
+        return `${truncatedLabel}<pre class="console-code-block">${escapeHtml(bodyText)}</pre>`;
+      };
+
+      const renderToolList = (tools, emptyText) => {
+        if (!tools?.length) return renderEmptyState(emptyText);
+        return `<div class="console-list">${tools.map((tool) => `
+          <article class="console-list-item">
+            <p class="console-list-title">${escapeHtml(tool.name)}</p>
+            <p class="console-list-subtitle">type: ${escapeHtml(tool.tool_type)}</p>
+          </article>`).join('')}</div>`;
+      };
+
       const renderRequestDetail = (payload) => {
         const request = payload.request;
         if (!request || request.status === 'not_found') {
           return renderEmptyState(request?.detail || 'request detail is not available yet');
         }
 
+        const response = request.response;
+        const toolVisibility = request.tool_visibility;
         return `<div class="console-detail-grid">
-          <div class="console-detail-row">
-            <p class="console-detail-label">Request Summary</p>
-            <p class="console-list-title">${escapeHtml(request.request_summary)}</p>
-          </div>
-          <div class="console-detail-row">
-            <p class="console-detail-label">Target</p>
-            <p>${escapeHtml(request.target_display_name)}</p>
-          </div>
-          <div class="console-detail-row">
-            <p class="console-detail-label">Provider / Model</p>
-            <p>${escapeHtml(request.provider)} · ${escapeHtml(request.model || 'unknown')}</p>
-          </div>
-          <div class="console-detail-row">
-            <p class="console-detail-label">Artifact Path</p>
-            <p><code>${escapeHtml(request.artifact_path)}</code></p>
-          </div>
-          <div class="console-detail-row">
-            <p class="console-detail-label">Probe Context</p>
-            <p>${escapeHtml(request.probe_context || '暂无 probe context')}</p>
-          </div>
+          <section class="console-detail-section">
+            <p class="console-detail-section-title">Request Overview</p>
+            <div class="console-detail-row">
+              <p class="console-detail-label">Request Summary</p>
+              <p class="console-list-title">${escapeHtml(request.request_summary)}</p>
+            </div>
+            <div class="console-detail-row">
+              <p class="console-detail-label">Target</p>
+              <p>${escapeHtml(request.target_display_name)}</p>
+            </div>
+            <div class="console-detail-row">
+              <p class="console-detail-label">Provider / Model</p>
+              <p>${escapeHtml(request.provider)} · ${escapeHtml(request.model || 'unknown')}</p>
+            </div>
+            <div class="console-detail-row">
+              <p class="console-detail-label">Request Route</p>
+              <p><code>${escapeHtml(request.method)} ${escapeHtml(request.url)}</code></p>
+            </div>
+            <div class="console-detail-row">
+              <p class="console-detail-label">Exchange / Hook</p>
+              <p>${escapeHtml(request.exchange_id || 'unknown')} · ${escapeHtml(request.hook_name || 'unknown')}</p>
+            </div>
+            <div class="console-detail-row">
+              <p class="console-detail-label">Artifact Path</p>
+              <p><code>${escapeHtml(request.artifact_path)}</code></p>
+            </div>
+            <div class="console-detail-row">
+              <p class="console-detail-label">Probe Context</p>
+              <p>${escapeHtml(request.probe_context || '暂无 probe context')}</p>
+            </div>
+          </section>
+          <section class="console-detail-section">
+            <p class="console-detail-section-title">Request Payload</p>
+            <div class="console-detail-row">
+              <p class="console-detail-label">Headers</p>
+              ${renderHeaderList(request.headers, '未记录 request headers')}
+            </div>
+            <div class="console-detail-row">
+              <p class="console-detail-label">Body (${escapeHtml(request.body_size_bytes || 0)} bytes)</p>
+              ${renderBodyBlock(request.body_text, request.truncated, '未记录 request body')}
+            </div>
+          </section>
+          <section class="console-detail-section">
+            <p class="console-detail-section-title">Tool Visibility</p>
+            ${toolVisibility ? `
+              <div class="console-detail-row">
+                <p class="console-detail-label">Stage / Count</p>
+                <p class="console-list-title">${escapeHtml(toolVisibility.visibility_stage)} · ${escapeHtml(toolVisibility.tool_count_final)} tool(s)</p>
+              </div>
+              <div class="console-detail-row">
+                <p class="console-detail-label">Tool Choice</p>
+                <p><code>${escapeHtml(toolVisibility.tool_choice || '未记录 tool choice')}</code></p>
+              </div>
+              <div class="console-detail-row">
+                <p class="console-detail-label">Final Tools</p>
+                ${renderToolList(toolVisibility.final_tools, 'final tools array is empty')}
+              </div>
+              <div class="console-detail-row">
+                <p class="console-detail-label">Visibility Artifact</p>
+                <p><code>${escapeHtml(toolVisibility.artifact_path)}</code></p>
+              </div>
+              <div class="console-detail-row">
+                <p class="console-detail-label">Final Tools JSON</p>
+                ${renderBodyBlock(toolVisibility.final_tools_json, false, '未记录 final tools json')}
+              </div>
+            ` : renderEmptyState('尚未关联到 tool visibility artifact')}
+          </section>
+          <section class="console-detail-section">
+            <p class="console-detail-section-title">Response Detail</p>
+            ${response ? `
+              <div class="console-detail-row">
+                <p class="console-detail-label">Status / Duration</p>
+                <p class="console-list-title">${escapeHtml(response.status_code)} · ${escapeHtml(response.duration_ms)}ms</p>
+              </div>
+              <div class="console-detail-row">
+                <p class="console-detail-label">Response Timing</p>
+                <p>${escapeHtml(response.started_at_ms)} → ${escapeHtml(response.completed_at_ms)}</p>
+              </div>
+              <div class="console-detail-row">
+                <p class="console-detail-label">Response Artifact</p>
+                <p><code>${escapeHtml(response.artifact_path)}</code></p>
+              </div>
+              <div class="console-detail-row">
+                <p class="console-detail-label">Headers</p>
+                ${renderHeaderList(response.headers, '未记录 response headers')}
+              </div>
+              <div class="console-detail-row">
+                <p class="console-detail-label">Body (${escapeHtml(response.body_size_bytes || 0)} bytes)</p>
+                ${renderBodyBlock(response.body_text, response.truncated, '尚未记录 response body')}
+              </div>
+            ` : renderEmptyState('尚未关联到 response artifact')}
+          </section>
         </div>`;
       };
 
@@ -1034,21 +1242,169 @@ fn filtered_empty_state_message(
     }
 }
 
+fn render_header_details_html(headers: &[ConsoleHeaderDetail], empty_text: &str) -> String {
+    if headers.is_empty() {
+        return render_console_empty_state(empty_text);
+    }
+
+    let items = headers
+        .iter()
+        .map(|header| {
+            format!(
+                "<article class=\"console-list-item\"><p class=\"console-list-title\">{}</p><p class=\"console-list-subtitle\"><code>{}</code></p></article>",
+                escape_html(&header.name),
+                escape_html(&header.value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    format!("<div class=\"console-list\">{items}</div>")
+}
+
+fn render_body_block_html(body_text: Option<&str>, truncated: bool, empty_text: &str) -> String {
+    let Some(body_text) = body_text else {
+        return render_console_empty_state(empty_text);
+    };
+
+    let truncated_hint = if truncated {
+        "<p class=\"console-detail-label\">captured body is truncated</p>"
+    } else {
+        ""
+    };
+
+    format!(
+        "{truncated_hint}<pre class=\"console-code-block\">{}</pre>",
+        escape_html(body_text)
+    )
+}
+
+fn render_tool_summaries_html(tools: &[ConsoleToolSummary], empty_text: &str) -> String {
+    if tools.is_empty() {
+        return render_console_empty_state(empty_text);
+    }
+
+    let items = tools
+        .iter()
+        .map(|tool| {
+            format!(
+                "<article class=\"console-list-item\"><p class=\"console-list-title\">{}</p><p class=\"console-list-subtitle\">type: {}</p></article>",
+                escape_html(&tool.name),
+                escape_html(&tool.tool_type)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    format!("<div class=\"console-list\">{items}</div>")
+}
+
 fn render_request_detail_panel(detail: Option<&ConsoleRequestDetail>) -> String {
     match detail {
         Some(detail) => format!(
-            "<div class=\"console-detail-grid\"><div class=\"console-detail-row\"><p class=\"console-detail-label\">Request Summary</p><p class=\"console-list-title\">{}</p></div><div class=\"console-detail-row\"><p class=\"console-detail-label\">Target</p><p>{}</p></div><div class=\"console-detail-row\"><p class=\"console-detail-label\">Provider / Model</p><p>{} · {}</p></div><div class=\"console-detail-row\"><p class=\"console-detail-label\">Artifact Path</p><p><code>{}</code></p></div><div class=\"console-detail-row\"><p class=\"console-detail-label\">Probe Context</p><p>{}</p></div></div>",
+            "<div class=\"console-detail-grid\">\
+                <section class=\"console-detail-section\">\
+                  <p class=\"console-detail-section-title\">Request Overview</p>\
+                  <div class=\"console-detail-row\"><p class=\"console-detail-label\">Request Summary</p><p class=\"console-list-title\">{}</p></div>\
+                  <div class=\"console-detail-row\"><p class=\"console-detail-label\">Target</p><p>{}</p></div>\
+                  <div class=\"console-detail-row\"><p class=\"console-detail-label\">Provider / Model</p><p>{} · {}</p></div>\
+                  <div class=\"console-detail-row\"><p class=\"console-detail-label\">Request Route</p><p><code>{} {}</code></p></div>\
+                  <div class=\"console-detail-row\"><p class=\"console-detail-label\">Exchange / Hook</p><p>{} · {}</p></div>\
+                  <div class=\"console-detail-row\"><p class=\"console-detail-label\">Artifact Path</p><p><code>{}</code></p></div>\
+                  <div class=\"console-detail-row\"><p class=\"console-detail-label\">Probe Context</p><p>{}</p></div>\
+                </section>\
+                <section class=\"console-detail-section\">\
+                  <p class=\"console-detail-section-title\">Request Payload</p>\
+                  <div class=\"console-detail-row\"><p class=\"console-detail-label\">Headers</p>{}</div>\
+                  <div class=\"console-detail-row\"><p class=\"console-detail-label\">Body ({} bytes)</p>{}</div>\
+                </section>\
+                <section class=\"console-detail-section\">\
+                  <p class=\"console-detail-section-title\">Tool Visibility</p>\
+                  {}\
+                </section>\
+                <section class=\"console-detail-section\">\
+                  <p class=\"console-detail-section-title\">Response Detail</p>\
+                  {}\
+                </section>\
+             </div>",
             escape_html(&detail.request_summary),
             escape_html(&detail.target_display_name),
             escape_html(&detail.provider),
             escape_html(detail.model.as_deref().unwrap_or("unknown")),
+            escape_html(&detail.method),
+            escape_html(&detail.url),
+            escape_html(detail.exchange_id.as_deref().unwrap_or("unknown")),
+            escape_html(&detail.hook_name),
             escape_html(&detail.artifact_path),
             escape_html(
                 detail
                     .probe_context
                     .as_deref()
                     .unwrap_or("暂无 probe context")
-            )
+            ),
+            render_header_details_html(&detail.headers, "未记录 request headers"),
+            detail.body_size_bytes,
+            render_body_block_html(
+                detail.body_text.as_deref(),
+                detail.truncated,
+                "未记录 request body"
+            ),
+            detail
+                .tool_visibility
+                .as_ref()
+                .map(|visibility| {
+                    format!(
+                        "<div class=\"console-detail-row\"><p class=\"console-detail-label\">Stage / Count</p><p class=\"console-list-title\">{} · {} tool(s)</p></div>\
+                         <div class=\"console-detail-row\"><p class=\"console-detail-label\">Tool Choice</p><p><code>{}</code></p></div>\
+                         <div class=\"console-detail-row\"><p class=\"console-detail-label\">Final Tools</p>{}</div>\
+                         <div class=\"console-detail-row\"><p class=\"console-detail-label\">Visibility Artifact</p><p><code>{}</code></p></div>\
+                         <div class=\"console-detail-row\"><p class=\"console-detail-label\">Final Tools JSON</p>{}</div>",
+                        escape_html(&visibility.visibility_stage),
+                        visibility.tool_count_final,
+                        escape_html(
+                            visibility
+                                .tool_choice
+                                .as_deref()
+                                .unwrap_or("未记录 tool choice")
+                        ),
+                        render_tool_summaries_html(
+                            &visibility.final_tools,
+                            "final tools array is empty"
+                        ),
+                        escape_html(&visibility.artifact_path),
+                        render_body_block_html(
+                            Some(&visibility.final_tools_json),
+                            false,
+                            "未记录 final tools json"
+                        )
+                    )
+                })
+                .unwrap_or_else(|| render_console_empty_state("尚未关联到 tool visibility artifact")),
+            detail
+                .response
+                .as_ref()
+                .map(|response| {
+                    format!(
+                        "<div class=\"console-detail-row\"><p class=\"console-detail-label\">Status / Duration</p><p class=\"console-list-title\">{} · {}ms</p></div>\
+                         <div class=\"console-detail-row\"><p class=\"console-detail-label\">Response Timing</p><p>{} → {}</p></div>\
+                         <div class=\"console-detail-row\"><p class=\"console-detail-label\">Response Artifact</p><p><code>{}</code></p></div>\
+                         <div class=\"console-detail-row\"><p class=\"console-detail-label\">Headers</p>{}</div>\
+                         <div class=\"console-detail-row\"><p class=\"console-detail-label\">Body ({} bytes)</p>{}</div>",
+                        response.status_code,
+                        response.duration_ms,
+                        response.started_at_ms,
+                        response.completed_at_ms,
+                        escape_html(&response.artifact_path),
+                        render_header_details_html(&response.headers, "未记录 response headers"),
+                        response.body_size_bytes,
+                        render_body_block_html(
+                            response.body_text.as_deref(),
+                            response.truncated,
+                            "尚未记录 response body"
+                        )
+                    )
+                })
+                .unwrap_or_else(|| render_console_empty_state("尚未关联到 response artifact"))
         ),
         None => render_console_empty_state("请选择一条 request 查看基础详情"),
     }
@@ -1520,16 +1876,37 @@ pub fn load_request_detail(
             record.method,
             request_path_only(&record.url)
         );
+        let response = record
+            .exchange_id
+            .as_deref()
+            .map(|exchange_id| load_matching_response_detail(storage, exchange_id))
+            .transpose()?
+            .flatten();
+        let tool_visibility = load_matching_tool_visibility_detail(
+            storage,
+            &record.request_id,
+            record.exchange_id.as_deref(),
+        )?;
 
         return Ok(Some(ConsoleRequestDetail {
             request_id: record.request_id,
+            exchange_id: record.exchange_id,
             captured_at_ms: record.captured_at_ms,
             provider: record.provider,
             model: record.model,
             target_display_name: record.target_display_name,
             artifact_path: record.artifact_path.display().to_string(),
             request_summary,
+            hook_name: record.hook_name,
+            method: record.method,
+            url: record.url,
+            headers: record.headers,
+            body_text: record.body_text,
+            body_size_bytes: record.body_size_bytes,
+            truncated: record.truncated,
             probe_context: None,
+            tool_visibility,
+            response,
         }));
     }
 
@@ -1572,6 +1949,10 @@ fn read_request_record(path: &Path) -> io::Result<Option<RequestArtifactRecord>>
         .get("captured_at_ms")
         .and_then(Value::as_u64)
         .unwrap_or_default();
+    let exchange_id = value
+        .get("exchange_id")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
     let pid = value
         .get("pid")
         .and_then(Value::as_u64)
@@ -1586,6 +1967,11 @@ fn read_request_record(path: &Path) -> io::Result<Option<RequestArtifactRecord>>
         .and_then(Value::as_str)
         .unwrap_or("unknown")
         .to_string();
+    let hook_name = value
+        .get("hook_name")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
     let method = value
         .get("method")
         .and_then(Value::as_str)
@@ -1596,6 +1982,20 @@ fn read_request_record(path: &Path) -> io::Result<Option<RequestArtifactRecord>>
         .and_then(Value::as_str)
         .unwrap_or("/")
         .to_string();
+    let headers = parse_header_details(value.get("headers"));
+    let body_text = value
+        .get("body_text")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    let body_size_bytes = value
+        .get("body_size_bytes")
+        .and_then(Value::as_u64)
+        .and_then(|size| usize::try_from(size).ok())
+        .unwrap_or_default();
+    let truncated = value
+        .get("truncated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let model = value
         .get("body_text")
         .and_then(Value::as_str)
@@ -1603,15 +2003,309 @@ fn read_request_record(path: &Path) -> io::Result<Option<RequestArtifactRecord>>
 
     Ok(Some(RequestArtifactRecord {
         request_id: request_id.to_string(),
+        exchange_id,
         pid,
         captured_at_ms,
         provider,
         model,
         target_display_name,
+        hook_name,
         method,
         url,
+        headers,
+        body_text,
+        body_size_bytes,
+        truncated,
         artifact_path: path.to_path_buf(),
     }))
+}
+
+fn parse_header_details(value: Option<&Value>) -> Vec<ConsoleHeaderDetail> {
+    value
+        .and_then(Value::as_array)
+        .map(|headers| {
+            headers
+                .iter()
+                .filter_map(|header| {
+                    Some(ConsoleHeaderDetail {
+                        name: header.get("name")?.as_str()?.to_string(),
+                        value: header.get("value")?.as_str()?.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn load_matching_response_detail(
+    storage: &StorageLayout,
+    exchange_id: &str,
+) -> io::Result<Option<ConsoleResponseDetail>> {
+    let responses_dir = storage.artifacts_dir.join("responses");
+    if !responses_dir.exists() {
+        return Ok(None);
+    }
+
+    let mut matched: Option<ResponseArtifactRecord> = None;
+    for entry in fs::read_dir(&responses_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+
+        let Some(record) = read_response_record(&path)? else {
+            continue;
+        };
+
+        if record.exchange_id != exchange_id {
+            continue;
+        }
+
+        let should_replace = matched
+            .as_ref()
+            .map(|current| record.completed_at_ms >= current.completed_at_ms)
+            .unwrap_or(true);
+        if should_replace {
+            matched = Some(record);
+        }
+    }
+
+    Ok(matched.map(|record| ConsoleResponseDetail {
+        artifact_path: record.artifact_path.display().to_string(),
+        status_code: record.status_code,
+        headers: record.headers,
+        body_text: record.body_text,
+        body_size_bytes: record.body_size_bytes,
+        truncated: record.truncated,
+        started_at_ms: record.started_at_ms,
+        completed_at_ms: record.completed_at_ms,
+        duration_ms: record.duration_ms,
+    }))
+}
+
+fn load_matching_tool_visibility_detail(
+    storage: &StorageLayout,
+    request_id: &str,
+    exchange_id: Option<&str>,
+) -> io::Result<Option<ConsoleToolVisibilityDetail>> {
+    let visibility_dir = storage.artifacts_dir.join("tool_visibility");
+    if !visibility_dir.exists() {
+        return Ok(None);
+    }
+
+    let mut matched: Option<ToolVisibilityArtifactRecord> = None;
+    for entry in fs::read_dir(&visibility_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+
+        let Some(record) = read_tool_visibility_record(&path)? else {
+            continue;
+        };
+
+        let request_matches = record.request_id == request_id;
+        let exchange_matches = exchange_id
+            .zip(record.exchange_id.as_deref())
+            .map(|(expected, actual)| expected == actual)
+            .unwrap_or(false);
+        if !request_matches && !exchange_matches {
+            continue;
+        }
+
+        let should_replace = matched
+            .as_ref()
+            .map(|current| record.captured_at_ms >= current.captured_at_ms)
+            .unwrap_or(true);
+        if should_replace {
+            matched = Some(record);
+        }
+    }
+
+    Ok(matched.map(|record| ConsoleToolVisibilityDetail {
+        artifact_path: record.artifact_path.display().to_string(),
+        visibility_stage: record.visibility_stage,
+        tool_choice: record.tool_choice,
+        tool_count_final: record.tool_count_final,
+        final_tools: record.final_tools,
+        final_tools_json: record.final_tools_json,
+    }))
+}
+
+fn read_response_record(path: &Path) -> io::Result<Option<ResponseArtifactRecord>> {
+    let raw = fs::read_to_string(path)?;
+    let value: Value = serde_json::from_str(&raw).map_err(io::Error::other)?;
+
+    let Some(exchange_id) = value.get("exchange_id").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+
+    let status_code = value
+        .get("status_code")
+        .and_then(Value::as_u64)
+        .and_then(|status| u16::try_from(status).ok())
+        .unwrap_or_default();
+    let headers = parse_header_details(value.get("headers"));
+    let body_text = value
+        .get("body_text")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    let body_size_bytes = value
+        .get("body_size_bytes")
+        .and_then(Value::as_u64)
+        .and_then(|size| usize::try_from(size).ok())
+        .unwrap_or_default();
+    let truncated = value
+        .get("truncated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let started_at_ms = value
+        .get("started_at_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let completed_at_ms = value
+        .get("completed_at_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let duration_ms = value
+        .get("duration_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| completed_at_ms.saturating_sub(started_at_ms));
+
+    Ok(Some(ResponseArtifactRecord {
+        exchange_id: exchange_id.to_string(),
+        status_code,
+        headers,
+        body_text,
+        body_size_bytes,
+        truncated,
+        started_at_ms,
+        completed_at_ms,
+        duration_ms,
+        artifact_path: path.to_path_buf(),
+    }))
+}
+
+fn read_tool_visibility_record(path: &Path) -> io::Result<Option<ToolVisibilityArtifactRecord>> {
+    let raw = fs::read_to_string(path)?;
+    let value: Value = serde_json::from_str(&raw).map_err(io::Error::other)?;
+
+    let Some(request_id) = value.get("request_id").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+
+    let exchange_id = value
+        .get("exchange_id")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    let captured_at_ms = value
+        .get("captured_at_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let visibility_stage = value
+        .get("visibility_stage")
+        .and_then(Value::as_str)
+        .unwrap_or("request-embedded")
+        .to_string();
+    let tool_choice = value
+        .get("tool_choice")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    let tool_count_final = value
+        .get("tool_count_final")
+        .and_then(Value::as_u64)
+        .and_then(|count| usize::try_from(count).ok())
+        .unwrap_or_default();
+    let final_tools_value = value
+        .get("final_tools_json")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    let final_tools = parse_tool_summaries(&final_tools_value);
+    let final_tools_json =
+        serde_json::to_string_pretty(&final_tools_value).map_err(io::Error::other)?;
+
+    Ok(Some(ToolVisibilityArtifactRecord {
+        request_id: request_id.to_string(),
+        exchange_id,
+        captured_at_ms,
+        visibility_stage,
+        tool_choice,
+        tool_count_final,
+        final_tools,
+        final_tools_json,
+        artifact_path: path.to_path_buf(),
+    }))
+}
+
+fn parse_tool_summaries(value: &Value) -> Vec<ConsoleToolSummary> {
+    value
+        .as_array()
+        .map(|tools| tools.iter().map(parse_tool_summary).collect())
+        .unwrap_or_default()
+}
+
+fn parse_tool_summary(tool: &Value) -> ConsoleToolSummary {
+    let fallback_name = serde_json::to_string(tool).unwrap_or_else(|_| "unknown".to_string());
+
+    if let Some(function) = tool.get("function") {
+        let name = function
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("unnamed tool");
+        let tool_type = tool
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("function");
+        return ConsoleToolSummary {
+            name: name.to_string(),
+            tool_type: tool_type.to_string(),
+        };
+    }
+
+    if let Some(name) = tool.get("name").and_then(Value::as_str) {
+        let tool_type = tool.get("type").and_then(Value::as_str).unwrap_or("tool");
+        return ConsoleToolSummary {
+            name: name.to_string(),
+            tool_type: tool_type.to_string(),
+        };
+    }
+
+    if let Some(name) = tool.as_str() {
+        return ConsoleToolSummary {
+            name: name.to_string(),
+            tool_type: "unknown".to_string(),
+        };
+    }
+
+    ConsoleToolSummary {
+        name: fallback_name,
+        tool_type: tool
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string(),
+    }
+}
+
+fn request_detail_matches_filter(
+    detail: &ConsoleRequestDetail,
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> bool {
+    let Some(filter) = filter else {
+        return true;
+    };
+
+    let target = ProcessTarget {
+        pid: 0,
+        app_name: detail.target_display_name.clone(),
+        executable_path: PathBuf::from(&detail.target_display_name),
+        command_line: None,
+        runtime_kind: prismtrace_core::RuntimeKind::Unknown,
+    };
+
+    filter.matches_target(&target)
 }
 
 fn extract_model_from_body_text(body_text: &str) -> Option<String> {
@@ -1654,18 +2348,74 @@ fn render_request_detail_payload(
     filter_context: Option<&ConsoleFilterContext>,
 ) -> String {
     let mut payload = match detail {
-        Some(detail) => json!({
-            "request": {
-                "request_id": detail.request_id,
-                "captured_at_ms": detail.captured_at_ms,
-                "provider": detail.provider,
-                "model": detail.model,
-                "target_display_name": detail.target_display_name,
-                "artifact_path": detail.artifact_path,
-                "request_summary": detail.request_summary,
-                "probe_context": detail.probe_context,
-            }
-        }),
+        Some(detail) => {
+            let headers = detail
+                .headers
+                .iter()
+                .map(|header| {
+                    json!({
+                        "name": &header.name,
+                        "value": &header.value,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let response_payload = detail.response.as_ref().map(|response| {
+                json!({
+                    "artifact_path": &response.artifact_path,
+                    "status_code": response.status_code,
+                    "headers": response.headers.iter().map(|header| {
+                        json!({
+                            "name": &header.name,
+                            "value": &header.value,
+                        })
+                    }).collect::<Vec<_>>(),
+                    "body_text": &response.body_text,
+                    "body_size_bytes": response.body_size_bytes,
+                    "truncated": response.truncated,
+                    "started_at_ms": response.started_at_ms,
+                    "completed_at_ms": response.completed_at_ms,
+                    "duration_ms": response.duration_ms,
+                })
+            });
+            let tool_visibility_payload = detail.tool_visibility.as_ref().map(|visibility| {
+                json!({
+                    "artifact_path": &visibility.artifact_path,
+                    "visibility_stage": &visibility.visibility_stage,
+                    "tool_choice": &visibility.tool_choice,
+                    "tool_count_final": visibility.tool_count_final,
+                    "final_tools": visibility.final_tools.iter().map(|tool| {
+                        json!({
+                            "name": &tool.name,
+                            "tool_type": &tool.tool_type,
+                        })
+                    }).collect::<Vec<_>>(),
+                    "final_tools_json": &visibility.final_tools_json,
+                })
+            });
+
+            json!({
+                "request": {
+                    "request_id": detail.request_id,
+                    "exchange_id": detail.exchange_id,
+                    "captured_at_ms": detail.captured_at_ms,
+                    "provider": detail.provider,
+                    "model": detail.model,
+                    "target_display_name": detail.target_display_name,
+                    "artifact_path": detail.artifact_path,
+                    "request_summary": detail.request_summary,
+                    "hook_name": detail.hook_name,
+                    "method": detail.method,
+                    "url": detail.url,
+                    "headers": headers,
+                    "body_text": detail.body_text,
+                    "body_size_bytes": detail.body_size_bytes,
+                    "truncated": detail.truncated,
+                    "probe_context": detail.probe_context,
+                    "tool_visibility": tool_visibility_payload,
+                    "response": response_payload,
+                }
+            })
+        }
         None => json!({
             "request": {
                 "request_id": request_id,
@@ -2317,13 +3067,50 @@ mod tests {
             }],
             request_details: vec![super::ConsoleRequestDetail {
                 request_id: "req-1".into(),
+                exchange_id: Some("ex-1".into()),
                 captured_at_ms: 30,
                 provider: "openai".into(),
                 model: Some("gpt-4.1".into()),
                 target_display_name: "Codex".into(),
                 artifact_path: "/tmp/request.json".into(),
                 request_summary: "openai POST /v1/responses".into(),
+                hook_name: "fetch".into(),
+                method: "POST".into(),
+                url: "https://api.openai.com/v1/responses".into(),
+                headers: vec![super::ConsoleHeaderDetail {
+                    name: "content-type".into(),
+                    value: "application/json".into(),
+                }],
+                body_text: Some("{\"model\":\"gpt-4.1\"}".into()),
+                body_size_bytes: 19,
+                truncated: false,
                 probe_context: Some("fetch hook".into()),
+                tool_visibility: Some(super::ConsoleToolVisibilityDetail {
+                    artifact_path: "/tmp/tool-visibility.json".into(),
+                    visibility_stage: "request-embedded".into(),
+                    tool_choice: Some("auto".into()),
+                    tool_count_final: 1,
+                    final_tools: vec![super::ConsoleToolSummary {
+                        name: "list_files".into(),
+                        tool_type: "function".into(),
+                    }],
+                    final_tools_json:
+                        "[{\"type\":\"function\",\"function\":{\"name\":\"list_files\"}}]".into(),
+                }),
+                response: Some(super::ConsoleResponseDetail {
+                    artifact_path: "/tmp/response.json".into(),
+                    status_code: 200,
+                    headers: vec![super::ConsoleHeaderDetail {
+                        name: "content-type".into(),
+                        value: "application/json".into(),
+                    }],
+                    body_text: Some("{\"output\":[]}".into()),
+                    body_size_bytes: 13,
+                    truncated: false,
+                    started_at_ms: 31,
+                    completed_at_ms: 33,
+                    duration_ms: 2,
+                }),
             }],
         });
 
@@ -2332,6 +3119,7 @@ mod tests {
             homepage.contains("id=\"request-detail-region\""),
             "homepage: {homepage}"
         );
+        assert!(homepage.contains("Tool Visibility"), "homepage: {homepage}");
         assert!(
             homepage.contains("Observability Health"),
             "homepage: {homepage}"
@@ -2997,16 +3785,69 @@ mod tests {
             requests_dir.join("1714000005000-77-1.json"),
             serde_json::json!({
                 "event_id": "77-1714000005000-1",
+                "exchange_id": "ex-77",
                 "pid": 77,
                 "target_display_name": "NodeApp",
                 "provider_hint": "anthropic",
                 "hook_name": "fetch",
                 "method": "POST",
                 "url": "https://api.anthropic.com/v1/messages",
+                "headers": [
+                    { "name": "content-type", "value": "application/json" }
+                ],
                 "body_text": "{\"model\":\"claude-3-7-sonnet\",\"messages\":[]}",
                 "body_size_bytes": 48,
                 "truncated": false,
                 "captured_at_ms": 1714000005000u64,
+            })
+            .to_string(),
+        )?;
+        let responses_dir = result.storage.artifacts_dir.join("responses");
+        fs::create_dir_all(&responses_dir)?;
+        fs::write(
+            responses_dir.join("1714000005100-77-2.json"),
+            serde_json::json!({
+                "event_id": "77-1714000005100-2",
+                "exchange_id": "ex-77",
+                "pid": 77,
+                "target_display_name": "NodeApp",
+                "provider_hint": "anthropic",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.anthropic.com/v1/messages",
+                "status_code": 200,
+                "headers": [
+                    { "name": "content-type", "value": "application/json" }
+                ],
+                "body_text": "{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}",
+                "body_size_bytes": 42,
+                "truncated": false,
+                "started_at_ms": 1714000005050u64,
+                "completed_at_ms": 1714000005100u64,
+                "duration_ms": 50u64
+            })
+            .to_string(),
+        )?;
+        let tool_visibility_dir = result.storage.artifacts_dir.join("tool_visibility");
+        fs::create_dir_all(&tool_visibility_dir)?;
+        fs::write(
+            tool_visibility_dir.join("1714000005000-77-1.json"),
+            serde_json::json!({
+                "request_id": "77-1714000005000-1",
+                "exchange_id": "ex-77",
+                "pid": 77,
+                "target_display_name": "NodeApp",
+                "provider_hint": "anthropic",
+                "captured_at_ms": 1714000005000u64,
+                "visibility_stage": "request-embedded",
+                "tool_choice": "auto",
+                "final_tools_json": [
+                    {
+                        "name": "run_command",
+                        "type": "function"
+                    }
+                ],
+                "tool_count_final": 1
             })
             .to_string(),
         )?;
@@ -3015,11 +3856,54 @@ mod tests {
             .expect("detail should exist");
 
         assert_eq!(detail.request_id, "77-1714000005000-1");
+        assert_eq!(detail.exchange_id.as_deref(), Some("ex-77"));
         assert_eq!(detail.provider, "anthropic");
         assert_eq!(detail.model.as_deref(), Some("claude-3-7-sonnet"));
         assert_eq!(detail.target_display_name, "NodeApp");
         assert!(detail.request_summary.contains("POST /v1/messages"));
+        assert_eq!(detail.method, "POST");
+        assert_eq!(detail.headers.len(), 1);
+        assert_eq!(
+            detail.body_text.as_deref(),
+            Some("{\"model\":\"claude-3-7-sonnet\",\"messages\":[]}")
+        );
         assert!(detail.artifact_path.ends_with("1714000005000-77-1.json"));
+        assert_eq!(
+            detail
+                .response
+                .as_ref()
+                .map(|response| response.status_code),
+            Some(200)
+        );
+        assert_eq!(
+            detail
+                .response
+                .as_ref()
+                .map(|response| response.duration_ms),
+            Some(50)
+        );
+        assert_eq!(
+            detail
+                .tool_visibility
+                .as_ref()
+                .map(|visibility| visibility.tool_count_final),
+            Some(1)
+        );
+        assert_eq!(
+            detail
+                .tool_visibility
+                .as_ref()
+                .and_then(|visibility| visibility.tool_choice.as_deref()),
+            Some("auto")
+        );
+        assert_eq!(
+            detail
+                .tool_visibility
+                .as_ref()
+                .and_then(|visibility| visibility.final_tools.first())
+                .map(|tool| tool.name.as_str()),
+            Some("run_command")
+        );
 
         fs::remove_dir_all(result.config.state_root)?;
         Ok(())
@@ -3035,16 +3919,71 @@ mod tests {
             requests_dir.join("1714000005000-77-1.json"),
             serde_json::json!({
                 "event_id": "demo-request",
+                "exchange_id": "ex-demo",
                 "pid": 77,
                 "target_display_name": "NodeApp",
                 "provider_hint": "anthropic",
                 "hook_name": "fetch",
                 "method": "POST",
                 "url": "https://api.anthropic.com/v1/messages",
+                "headers": [
+                    { "name": "content-type", "value": "application/json" }
+                ],
                 "body_text": "{\"model\":\"claude-3-7-sonnet\",\"messages\":[]}",
                 "body_size_bytes": 48,
                 "truncated": false,
                 "captured_at_ms": 1714000005000u64,
+            })
+            .to_string(),
+        )?;
+        let responses_dir = result.storage.artifacts_dir.join("responses");
+        fs::create_dir_all(&responses_dir)?;
+        fs::write(
+            responses_dir.join("1714000005100-77-2.json"),
+            serde_json::json!({
+                "event_id": "demo-response",
+                "exchange_id": "ex-demo",
+                "pid": 77,
+                "target_display_name": "NodeApp",
+                "provider_hint": "anthropic",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.anthropic.com/v1/messages",
+                "status_code": 200,
+                "headers": [
+                    { "name": "content-type", "value": "application/json" }
+                ],
+                "body_text": "{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}",
+                "body_size_bytes": 42,
+                "truncated": false,
+                "started_at_ms": 1714000005050u64,
+                "completed_at_ms": 1714000005100u64,
+                "duration_ms": 50u64
+            })
+            .to_string(),
+        )?;
+        let tool_visibility_dir = result.storage.artifacts_dir.join("tool_visibility");
+        fs::create_dir_all(&tool_visibility_dir)?;
+        fs::write(
+            tool_visibility_dir.join("1714000005000-77-1.json"),
+            serde_json::json!({
+                "request_id": "demo-request",
+                "exchange_id": "ex-demo",
+                "pid": 77,
+                "target_display_name": "NodeApp",
+                "provider_hint": "anthropic",
+                "captured_at_ms": 1714000005000u64,
+                "visibility_stage": "request-embedded",
+                "tool_choice": "auto",
+                "final_tools_json": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "list_files"
+                        }
+                    }
+                ],
+                "tool_count_final": 1
             })
             .to_string(),
         )?;
@@ -3066,6 +4005,90 @@ mod tests {
         assert!(response.contains("demo-request"), "response: {response}");
         assert!(
             response.contains("claude-3-7-sonnet"),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"exchange_id\":\"ex-demo\""),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"status_code\":200"),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"body_text\":\"{\\\"content\\\":[{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"hi\\\"}]}\""),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"tool_visibility\""),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"tool_count_final\":1"),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"tool_choice\":\"auto\""),
+            "response: {response}"
+        );
+        assert!(response.contains("list_files"), "response: {response}");
+
+        handle.join().expect("server thread should join")?;
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn console_server_filtered_request_detail_does_not_leak_unmatched_request() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let requests_dir = result.storage.artifacts_dir.join("requests");
+        fs::create_dir_all(&requests_dir)?;
+        fs::write(
+            requests_dir.join("1714000005000-77-1.json"),
+            serde_json::json!({
+                "event_id": "demo-request",
+                "exchange_id": "ex-demo",
+                "pid": 77,
+                "target_display_name": "Codex",
+                "provider_hint": "openai",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.openai.com/v1/responses",
+                "headers": [],
+                "body_text": "{\"model\":\"gpt-4.1\",\"input\":\"hello\"}",
+                "body_size_bytes": 34,
+                "truncated": false,
+                "captured_at_ms": 1714000005000u64,
+            })
+            .to_string(),
+        )?;
+
+        let filter = super::ConsoleTargetFilterConfig::new(vec!["opencode".into()]);
+        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", Some(&filter))?;
+        let addr = server
+            .local_url()?
+            .trim_start_matches("http://")
+            .to_string();
+
+        let handle = thread::spawn(move || server.serve_once());
+
+        let response = send_get_request(&addr, "/api/requests/demo-request")?;
+
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK"),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"status\":\"not_found\""),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("\"active_filters\":[\"opencode\"]"),
+            "response: {response}"
+        );
+        assert!(
+            !response.contains("\"provider\":\"openai\""),
             "response: {response}"
         );
 

@@ -1,5 +1,6 @@
 use crate::ipc::{IpcEvent, IpcListener};
 use crate::response_capture;
+use crate::tool_visibility;
 use prismtrace_core::{HttpHeader, IpcMessage, ProcessTarget};
 use prismtrace_storage::StorageLayout;
 use std::collections::HashMap;
@@ -75,6 +76,7 @@ pub struct CapturedRequestEvent {
     pub artifact_path: PathBuf,
     pub body_size_bytes: usize,
     pub summary: String,
+    pub tool_visibility_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,6 +186,20 @@ pub fn capture_observed_request(
         .to_string(),
     )?;
 
+    let tool_visibility_summary = tool_visibility::capture_request_embedded_tool_visibility(
+        storage,
+        target,
+        tool_visibility::RequestToolVisibilityCapture {
+            request_id: &event_id,
+            exchange_id,
+            provider_hint,
+            captured_at_ms: *timestamp_ms,
+            body_text: body_text.as_deref(),
+            sequence,
+        },
+    )?
+    .map(|event| event.summary);
+
     Ok(Some(CapturedRequestEvent {
         event_id,
         exchange_id: exchange_id.clone(),
@@ -203,6 +219,7 @@ pub fn capture_observed_request(
             path_only(url),
             path_label
         ),
+        tool_visibility_summary,
     }))
 }
 
@@ -295,6 +312,9 @@ pub fn consume_probe_events(
                     provider_hints_by_exchange
                         .insert(event.exchange_id.clone(), event.provider_hint.clone());
                     writeln!(output, "{}", event.summary)?;
+                    if let Some(summary) = event.tool_visibility_summary.as_deref() {
+                        writeln!(output, "{summary}")?;
+                    }
                     sequence += 1;
                 }
             }
@@ -392,7 +412,10 @@ mod tests {
                 name: "authorization".into(),
                 value: "Bearer sk-test".into(),
             }],
-            body_text: Some(r#"{"model":"gpt-4.1","input":"hello"}"#.into()),
+            body_text: Some(
+                r#"{"model":"gpt-4.1","input":"hello","tool_choice":"auto","tools":[{"type":"function","function":{"name":"list_files"}}]}"#
+                    .into(),
+            ),
             body_truncated: false,
             timestamp_ms: 1_714_000_004_000,
         };
@@ -414,6 +437,20 @@ mod tests {
                 .join("requests")
                 .join("1714000004000-42-1.json")
                 .exists()
+        );
+        assert!(
+            storage
+                .artifacts_dir
+                .join("tool_visibility")
+                .join("1714000004000-42-1.json")
+                .exists()
+        );
+        assert!(
+            event
+                .tool_visibility_summary
+                .as_deref()
+                .is_some_and(|summary| summary
+                    .contains("[tools] openai request-embedded 1 final tool(s) choice=auto"))
         );
 
         fs::remove_dir_all(root).expect("temp root cleanup should succeed");
@@ -592,7 +629,10 @@ mod tests {
                     method: "POST".into(),
                     url: "https://api.openai.com/v1/responses".into(),
                     headers: vec![],
-                    body_text: Some("{}".into()),
+                    body_text: Some(
+                        r#"{"tools":[{"type":"function","function":{"name":"list_files"}}]}"#
+                            .into(),
+                    ),
                     body_truncated: false,
                     timestamp_ms: 10,
                 }
@@ -608,6 +648,7 @@ mod tests {
 
         let text = String::from_utf8(output).expect("stdout should be utf8");
         assert!(text.contains("[captured] openai POST /v1/responses"));
+        assert!(text.contains("[tools] openai request-embedded 1 final tool(s)"));
         assert_eq!(outcome.exit, ProbeConsumeExit::DetachAck);
         fs::remove_dir_all(root).expect("temp root cleanup should succeed");
     }
