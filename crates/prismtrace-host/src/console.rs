@@ -2094,7 +2094,8 @@ fn load_matching_tool_visibility_detail(
         return Ok(None);
     }
 
-    let mut matched: Option<ToolVisibilityArtifactRecord> = None;
+    let mut request_match: Option<ToolVisibilityArtifactRecord> = None;
+    let mut exchange_match: Option<ToolVisibilityArtifactRecord> = None;
     for entry in fs::read_dir(&visibility_dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -2111,19 +2112,26 @@ fn load_matching_tool_visibility_detail(
             .zip(record.exchange_id.as_deref())
             .map(|(expected, actual)| expected == actual)
             .unwrap_or(false);
-        if !request_matches && !exchange_matches {
-            continue;
-        }
-
-        let should_replace = matched
-            .as_ref()
-            .map(|current| record.captured_at_ms >= current.captured_at_ms)
-            .unwrap_or(true);
-        if should_replace {
-            matched = Some(record);
+        if request_matches {
+            let should_replace = request_match
+                .as_ref()
+                .map(|current| record.captured_at_ms >= current.captured_at_ms)
+                .unwrap_or(true);
+            if should_replace {
+                request_match = Some(record);
+            }
+        } else if exchange_matches {
+            let should_replace = exchange_match
+                .as_ref()
+                .map(|current| record.captured_at_ms >= current.captured_at_ms)
+                .unwrap_or(true);
+            if should_replace {
+                exchange_match = Some(record);
+            }
         }
     }
 
+    let matched = request_match.or(exchange_match);
     Ok(matched.map(|record| ConsoleToolVisibilityDetail {
         artifact_path: record.artifact_path.display().to_string(),
         visibility_stage: record.visibility_stage,
@@ -3903,6 +3911,80 @@ mod tests {
                 .and_then(|visibility| visibility.final_tools.first())
                 .map(|tool| tool.name.as_str()),
             Some("run_command")
+        );
+
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn load_request_detail_prefers_exact_tool_visibility_request_match() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let requests_dir = result.storage.artifacts_dir.join("requests");
+        fs::create_dir_all(&requests_dir)?;
+        fs::write(
+            requests_dir.join("1714000005000-77-1.json"),
+            serde_json::json!({
+                "event_id": "demo-request",
+                "exchange_id": "ex-demo",
+                "pid": 77,
+                "target_display_name": "NodeApp",
+                "provider_hint": "anthropic",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.anthropic.com/v1/messages",
+                "headers": [],
+                "body_text": "{\"model\":\"claude-3-7-sonnet\",\"messages\":[]}",
+                "body_size_bytes": 48,
+                "truncated": false,
+                "captured_at_ms": 1714000005000u64,
+            })
+            .to_string(),
+        )?;
+        let tool_visibility_dir = result.storage.artifacts_dir.join("tool_visibility");
+        fs::create_dir_all(&tool_visibility_dir)?;
+        fs::write(
+            tool_visibility_dir.join("1714000005000-77-1.json"),
+            serde_json::json!({
+                "request_id": "demo-request",
+                "exchange_id": "ex-demo",
+                "captured_at_ms": 1714000005000u64,
+                "visibility_stage": "request-embedded",
+                "tool_choice": "auto",
+                "final_tools_json": [
+                    { "type": "function", "function": { "name": "exact_request_tool" } }
+                ],
+                "tool_count_final": 1
+            })
+            .to_string(),
+        )?;
+        fs::write(
+            tool_visibility_dir.join("1714000006000-77-2.json"),
+            serde_json::json!({
+                "request_id": "different-request",
+                "exchange_id": "ex-demo",
+                "captured_at_ms": 1714000006000u64,
+                "visibility_stage": "request-embedded",
+                "tool_choice": "auto",
+                "final_tools_json": [
+                    { "type": "function", "function": { "name": "exchange_only_tool" } }
+                ],
+                "tool_count_final": 1
+            })
+            .to_string(),
+        )?;
+
+        let detail =
+            load_request_detail(&result.storage, "demo-request")?.expect("detail should exist");
+
+        assert_eq!(
+            detail
+                .tool_visibility
+                .as_ref()
+                .and_then(|visibility| visibility.final_tools.first())
+                .map(|tool| tool.name.as_str()),
+            Some("exact_request_tool")
         );
 
         fs::remove_dir_all(result.config.state_root)?;

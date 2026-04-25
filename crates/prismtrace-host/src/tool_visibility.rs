@@ -67,9 +67,9 @@ pub fn capture_request_embedded_tool_visibility(
             "target_display_name": target.display_name(),
             "provider_hint": capture.provider_hint,
             "captured_at_ms": capture.captured_at_ms,
-            "visibility_stage": visibility_stage,
-            "tool_choice": parsed.tool_choice,
-            "final_tools_json": parsed.final_tools_json,
+            "visibility_stage": &visibility_stage,
+            "tool_choice": &parsed.tool_choice,
+            "final_tools_json": &parsed.final_tools_json,
             "tool_count_final": parsed.tool_count_final,
         })
         .to_string(),
