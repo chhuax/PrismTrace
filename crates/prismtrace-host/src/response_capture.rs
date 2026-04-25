@@ -127,6 +127,7 @@ mod tests {
     use super::{capture_observed_response, capture_observed_response_with_hint};
     use prismtrace_core::{HttpHeader, IpcMessage, ProcessTarget, RuntimeKind};
     use prismtrace_storage::StorageLayout;
+    use serde_json::Value;
     use std::fs;
     use std::path::PathBuf;
     use std::process;
@@ -180,6 +181,110 @@ mod tests {
     }
 
     #[test]
+    fn capture_observed_response_persists_duration_and_truncation_metadata() {
+        let root = temp_root("response-metadata");
+        let storage = StorageLayout::new(&root);
+        storage.initialize().expect("storage should initialize");
+        let target = ProcessTarget {
+            pid: 125,
+            app_name: "Example".into(),
+            executable_path: PathBuf::from("/usr/local/bin/example"),
+            command_line: None,
+            runtime_kind: RuntimeKind::Node,
+        };
+        let msg = IpcMessage::HttpResponseObserved {
+            exchange_id: "ex-meta".into(),
+            hook_name: "fetch".into(),
+            method: "POST".into(),
+            url: "https://api.openai.com/v1/responses".into(),
+            status_code: 200,
+            headers: vec![HttpHeader {
+                name: "content-type".into(),
+                value: "application/json".into(),
+            }],
+            body_text: Some("{\"ok\":true}".into()),
+            body_truncated: true,
+            started_at_ms: 100,
+            completed_at_ms: 250,
+        };
+
+        let event = capture_observed_response(&storage, &target, &msg, 7)
+            .expect("capture should succeed")
+            .expect("should capture response");
+
+        assert_eq!(event.duration_ms, 150);
+        assert_eq!(event.body_size_bytes, "{\"ok\":true}".len());
+
+        let artifact = fs::read_to_string(&event.artifact_path).expect("artifact should exist");
+        let payload: Value = serde_json::from_str(&artifact).expect("artifact should be json");
+
+        assert_eq!(payload["exchange_id"], "ex-meta");
+        assert_eq!(payload["body_size_bytes"], "{\"ok\":true}".len());
+        assert_eq!(payload["truncated"], true);
+        assert_eq!(payload["duration_ms"], 150);
+
+        fs::remove_dir_all(root).expect("temp root cleanup should succeed");
+    }
+
+    #[test]
+    fn capture_observed_response_persists_error_status_with_empty_body() {
+        let root = temp_root("response-error-empty-body");
+        let storage = StorageLayout::new(&root);
+        storage.initialize().expect("storage should initialize");
+        let target = ProcessTarget {
+            pid: 128,
+            app_name: "Example".into(),
+            executable_path: PathBuf::from("/usr/local/bin/example"),
+            command_line: None,
+            runtime_kind: RuntimeKind::Node,
+        };
+        let msg = IpcMessage::HttpResponseObserved {
+            exchange_id: "ex-error".into(),
+            hook_name: "fetch".into(),
+            method: "POST".into(),
+            url: "https://api.openai.com/v1/responses".into(),
+            status_code: 429,
+            headers: vec![
+                HttpHeader {
+                    name: "content-type".into(),
+                    value: "application/json".into(),
+                },
+                HttpHeader {
+                    name: "retry-after".into(),
+                    value: "2".into(),
+                },
+            ],
+            body_text: None,
+            body_truncated: false,
+            started_at_ms: 400,
+            completed_at_ms: 440,
+        };
+
+        let event = capture_observed_response(&storage, &target, &msg, 9)
+            .expect("capture should succeed")
+            .expect("error responses should still be captured");
+
+        assert_eq!(event.exchange_id, "ex-error");
+        assert_eq!(event.status_code, 429);
+        assert_eq!(event.body_size_bytes, 0);
+        assert!(
+            event
+                .summary
+                .contains("[response] openai 429 POST /v1/responses 40ms")
+        );
+
+        let artifact = fs::read_to_string(&event.artifact_path).expect("artifact should exist");
+        let payload: Value = serde_json::from_str(&artifact).expect("artifact should be json");
+
+        assert_eq!(payload["status_code"], 429);
+        assert_eq!(payload["body_size_bytes"], 0);
+        assert!(payload["body_text"].is_null());
+        assert_eq!(payload["duration_ms"], 40);
+
+        fs::remove_dir_all(root).expect("temp root cleanup should succeed");
+    }
+
+    #[test]
     fn capture_observed_response_redacts_cookie_headers() {
         let root = temp_root("cookie-response");
         let storage = StorageLayout::new(&root);
@@ -222,6 +327,91 @@ mod tests {
 
         assert!(!artifact.contains("session=secret"));
         assert!(artifact.contains("[redacted]"));
+
+        fs::remove_dir_all(root).expect("temp root cleanup should succeed");
+    }
+
+    #[test]
+    fn capture_observed_response_prefers_explicit_provider_hint_override() {
+        let root = temp_root("response-hint-override");
+        let storage = StorageLayout::new(&root);
+        storage.initialize().expect("storage should initialize");
+        let target = ProcessTarget {
+            pid: 126,
+            app_name: "Example".into(),
+            executable_path: PathBuf::from("/usr/local/bin/example"),
+            command_line: None,
+            runtime_kind: RuntimeKind::Node,
+        };
+        let msg = IpcMessage::HttpResponseObserved {
+            exchange_id: "ex-override".into(),
+            hook_name: "fetch".into(),
+            method: "POST".into(),
+            url: "https://api.openai.com/v1/responses".into(),
+            status_code: 200,
+            headers: vec![HttpHeader {
+                name: "content-type".into(),
+                value: "application/json".into(),
+            }],
+            body_text: Some("{\"output\":[]}".into()),
+            body_truncated: false,
+            started_at_ms: 10,
+            completed_at_ms: 20,
+        };
+
+        let event = capture_observed_response_with_hint(
+            &storage,
+            &target,
+            &msg,
+            1,
+            Some("request-side-provider"),
+        )
+        .expect("capture should succeed")
+        .expect("should capture response");
+
+        assert_eq!(event.provider_hint, "request-side-provider");
+        assert!(
+            event
+                .summary
+                .contains("[response] request-side-provider 200 POST")
+        );
+
+        fs::remove_dir_all(root).expect("temp root cleanup should succeed");
+    }
+
+    #[test]
+    fn capture_observed_response_skips_unrecognized_provider_without_override() {
+        let root = temp_root("response-unrecognized");
+        let storage = StorageLayout::new(&root);
+        storage.initialize().expect("storage should initialize");
+        let target = ProcessTarget {
+            pid: 127,
+            app_name: "Example".into(),
+            executable_path: PathBuf::from("/usr/local/bin/example"),
+            command_line: None,
+            runtime_kind: RuntimeKind::Node,
+        };
+        let msg = IpcMessage::HttpResponseObserved {
+            exchange_id: "ex-unknown".into(),
+            hook_name: "fetch".into(),
+            method: "GET".into(),
+            url: "https://example.invalid/not-a-provider".into(),
+            status_code: 200,
+            headers: vec![],
+            body_text: None,
+            body_truncated: false,
+            started_at_ms: 1,
+            completed_at_ms: 2,
+        };
+
+        let event = capture_observed_response(&storage, &target, &msg, 1)
+            .expect("capture should succeed for unknown providers");
+
+        assert!(event.is_none(), "unknown provider should be ignored");
+        assert!(
+            !storage.artifacts_dir.join("responses").exists(),
+            "ignored response should not create artifacts"
+        );
 
         fs::remove_dir_all(root).expect("temp root cleanup should succeed");
     }

@@ -7,6 +7,7 @@ pub mod readiness;
 pub mod request_capture;
 pub mod response_capture;
 pub mod runtime;
+pub mod tool_visibility;
 
 use attach::{AttachBackend, AttachController, LiveAttachBackend, attach_report};
 use discovery::{ProcessSampleSource, discover_targets};
