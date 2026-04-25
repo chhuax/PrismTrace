@@ -17,7 +17,7 @@
 - 为 `Codex` 新增一条独立于 attach 的官方观测后端接入方案
 - 定义第一版最小事件面：`thread / turn / item / tool / approval / hook / plugin / skill / app`
 - 先交付最小 CLI/host 验证入口，而不是直接扩展复杂 UI
-- 保持现有 Node / Electron attach 路线不变，避免混线
+- 不重新引入或恢复 legacy attach 路线
 
 ## Capabilities
 
@@ -25,13 +25,9 @@
 
 - `codex-app-server-observer`: 通过 `Codex App Server + IPC socket` 读取 `Codex` 的高层运行时事件
 
-### Modified Capabilities
-
-- `attach-readiness`: 继续对 `Codex` 保持“不可 attach”或等价保守表达，避免误导用户走危险 attach 路线
-
 ## Impact
 
 - 影响代码：集中在 `crates/prismtrace-host`，以新增 `Codex` observer 模块为主
-- 影响系统行为：`Codex` 将拥有新的官方观测入口，但不会进入现有 attach 控制器
+- 影响系统行为：`Codex` 将拥有新的官方观测入口，且不会进入任何 legacy attach 控制链
 - 影响文档：新增 `add-codex-app-server-observer` story 与 OpenSpec 文档
 - 边界说明：本次不交付 `Codex -> 模型后端` 的原始 HTTP 报文抓取，也不先交付复杂控制台 UI

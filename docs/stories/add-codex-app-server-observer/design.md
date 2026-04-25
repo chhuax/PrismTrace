@@ -1,7 +1,8 @@
 # Codex App Server Observer 设计稿
 
 日期：2026-04-25  
-状态：草案，待按此方案进入实现
+更新：2026-04-26  
+状态：进行中，已补充统一 observer UI 约束
 
 ## 1. 背景
 
@@ -24,7 +25,7 @@
 1. 明确 `Codex` 观测后端的接入方式
 2. 明确第一版事件面和统一读模型
 3. 明确它与现有 attach/probe 路线如何并存
-4. 明确最小实现入口先做 CLI/host 验证，而不是先做复杂 UI
+4. 明确最小实现入口先做 CLI/host 验证，再接入 Stitch 控制台的最小 observer 展示
 
 ## 3. 非目标
 
@@ -33,8 +34,9 @@
 - 不做 `Codex` live attach
 - 不再尝试 `SIGUSR1` / inspector 路线
 - 不承诺获取 `Codex -> 模型后端` 的原始 HTTP 报文
-- 不先做本地控制台复杂展示
-- 不研究 `opencode` 或 `claude code`
+- 不重做 Stitch 已产出的本地控制台视觉稿
+- 不为 `Codex` 和 `opencode` 分别做两套独立 UI
+- 不研究 `claude code`
 - 不改现有 Node/Electron attach 主链的行为
 
 ## 4. 用户价值
@@ -51,6 +53,10 @@
 `Codex 专用高层运行时观测器`
 
 而不是继续把它误当成“Codex 原始报文抓包器”。
+
+同时，既然 `opencode` 也已经转向 observer 方式，这一轮的产品收敛目标应进一步明确为：
+
+`先把 Codex 打通，再让 Codex 和 opencode 共用同一套 observer 控制台语义。`
 
 ## 5. 方案总览
 
@@ -72,7 +78,7 @@
 - 作为 `Codex App Server client` 建立连接
 - 读取高层运行时事件
 - 将其归一化成 host 内统一的 observability event
-- 第一版先走 CLI/host 输出，不强依赖控制台 UI
+- 第一版先走 CLI/host 输出，再接到既有 Stitch 控制台的最小 observer 视图
 
 ### 5.2 接入形态
 
@@ -214,7 +220,7 @@
 
 这里保留 `raw_json` 很重要，因为第一版我们还在探索 `Codex` 协议的实际信息密度，先把原始响应保留住，后续再稳定投影。
 
-## 8. 与现有 attach 路线如何并存
+## 8. 与 legacy attach 路线的边界
 
 这是这次设计最关键的边界。
 
@@ -232,20 +238,24 @@
 - 这些抽象都是围绕“把探针注入目标进程”设计的
 - `Codex App Server` 是官方协议客户端模型，不是注入模型
 
-### 8.2 在 host 层并列两个 source
+### 8.2 在 host 层以 observer source 为主
 
-建议 host 在采集面上形成两条 source：
+当前 host 的产品面已经清理旧 attach 控制链，建议采集面直接以 observer source 组织：
 
-1. `AttachProbeSource`
-   - 现有 Node / Electron attach 路线
+1. `CodexAppServerSource`
+   - `Codex` 官方接入路线
 
-2. `CodexAppServerSource`
-   - 新增 `Codex` 官方接入路线
+2. `OpencodeObserverSource`
+   - `opencode` 的 observer / snapshot 读取路线
 
-这两条 source 最终都可以汇聚到：
+3. 后续 `ClaudeCodeTranscriptSource`
+   - `Claude Code` transcript / export 路线
+
+这些 source 最终都可以汇聚到：
 
 - 统一 artifact 存储策略
 - 统一 timeline / inspector 演进方向
+- 统一控制台信息架构
 
 但第一版先不要强行统一到一个大而全的 event schema。先在 host 内保证：
 
@@ -253,22 +263,108 @@
 - 存储结构清晰
 - CLI 可验证
 
-### 8.3 readiness 维持保守
+### 8.3 不再给 `Codex` 暴露 attach 心智
 
-当前 `readiness` 中对 `Codex` 标记 `unsupported` 的策略应继续保留，直到新的官方观测入口上线。
+后续如果要在控制台中给用户“如何观测 Codex”的引导，也应直接显示：
 
-后续如果要在控制台中给用户“如何观测 Codex”的引导，也应显示为：
+- 使用官方 observer 路线
+- 不再提供 attach 入口或 attach-ready 暗示
 
-- 不支持 attach
-- 但支持官方 observer 路线
+## 9. 统一 Observer UI 原则
 
-而不是重新把 `Codex` 标成 attach-ready。
+Stitch 已经产出了一版本地控制台设计稿，这一版视觉方向继续保留，不重新推翻。需要调整的是信息架构和交互语义，让它从旧的 attach 心智切换到新的 observer 心智。
 
-## 9. 最小实现建议
+### 9.1 UI 调整目标
+
+控制台需要从：
+
+- “目标进程 attach 监控台”
+
+调整为：
+
+- “统一 observer 运行时观测台”
+
+这里的“统一”有两个硬约束：
+
+1. `Codex` 和 `opencode` 必须共用一套 UI 壳
+2. 右侧 inspector、会话列表、时间线都按统一 observer 事件来组织，而不是按接入方式硬分页面
+
+### 9.2 保留什么，不保留什么
+
+建议保留：
+
+- Stitch 设计稿的整体三栏布局
+- 顶部导航和筛选带
+- 左侧导航骨架
+- 右侧 inspector 区域
+- 既有视觉语言、卡片样式和信息密度
+
+建议调整：
+
+- `Targets` 的语义，改成 `Sources` 或 `Runtimes`
+- `Requests` 的语义，扩成 `Events`
+- 列表主轴从 HTTP request stream 扩成 observer event stream
+- attach 状态从主叙事降级为 source health 的一部分
+
+### 9.3 统一展示模型
+
+控制台第一版应统一展示这几类东西：
+
+- source
+  - 例如 `codex-app-server`、`opencode`
+- session
+  - 一次 observer 连接或一次上层会话
+- event
+  - `thread / turn / item / tool / approval / hook / capability / message`
+
+中间主列表建议统一成一套事件流表壳，最少包含：
+
+- `Source`
+- `Kind`
+- `Summary`
+- `Status`
+- `Time`
+
+其中：
+
+- `Codex` 主要落到 `thread / turn / item / tool / approval / hook / capability`
+- `opencode` 主要落到 `session / message / tool / snapshot`
+
+字段不要求完全相同，但都必须能投影到同一套列表框架里。
+
+### 9.4 Inspector 原则
+
+右侧 inspector 继续保留一个统一容器，但内容应按事件类型自适应：
+
+- 点 `Codex tool`，显示 tool detail
+- 点 `Codex approval`，显示 approval detail
+- 点 `Codex item`，显示 item / raw payload
+- 点 `opencode message`，显示 message detail
+- 点 `opencode tool`，显示 tool / result detail
+
+也就是说：
+
+- UI 壳统一
+- detail 面板按事件类型切换
+
+而不是给不同来源做两套完全独立的 detail 页面。
+
+### 9.5 第一版展示边界
+
+这一轮只做最小 observer 可见性，不做控制台大改版：
+
+- 要能看到 `Codex` 和 `opencode` 的统一入口
+- 要能看到 session / timeline / event 摘要
+- 要能在 inspector 里看最小 detail
+- 不做复杂聚合分析
+- 不做深度 request payload 解释
+- 不做 attach 与 observer 的全量对账界面
+
+## 10. 最小实现建议
 
 如果进入实现，建议只做一个最小 CLI/host slice。
 
-### 9.1 第一版功能
+### 10.1 第一版功能
 
 只实现：
 
@@ -277,16 +373,17 @@
 3. 完成初始化握手
 4. 读取并打印高层事件摘要
 5. 以结构化 JSON artifact 落盘
+6. 将 `Codex` / `opencode` observer artifact 以最小方式接到统一控制台壳中
 
-### 9.2 第一版不做
+### 10.2 第一版不做
 
-- 不做复杂本地控制台 UI
-- 不做会话分析
-- 不做 request inspector 融合
-- 不做跨 source 统一 timeline
+- 不重做 Stitch 视觉稿
+- 不做复杂本地控制台 UI 重构
+- 不做高级会话分析
+- 不做深度 request inspector 融合
 - 不做原始 payload 解释
 
-## 10. 文件边界建议
+## 11. 文件边界建议
 
 如果进入实现，建议修改范围控制在这些地方：
 
@@ -314,37 +411,37 @@
 
 ### 暂不改
 
-- `crates/prismtrace-host/src/attach.rs`
 - `crates/prismtrace-host/src/runtime.rs`
 - `crates/prismtrace-host/src/request_capture.rs`
 - `crates/prismtrace-host/src/response_capture.rs`
-- `crates/prismtrace-host/src/console.rs`
 
-## 11. 验证策略
+## 12. 验证策略
 
 实现前和实现后都应围绕三层验证：
 
-### 11.1 协议层
+### 12.1 协议层
 
 - 最小 initialize 是否成功
 - live socket 是否能建立读取循环
 
-### 11.2 事件层
+### 12.2 事件层
 
 - thread / turn / item / tool / approval / hook / capability snapshot 是否能被归一化
 - 未知事件是否会降级保留 raw JSON，而不是直接丢弃
 
-### 11.3 产品层
+### 12.3 产品层
 
 - 用户是否能通过 CLI 直接看到 `Codex` 在做什么
-- 即使没有 UI，是否已经可以回答“它刚才做了哪些步骤、停在哪、用了什么能力”
+- 用户是否能在统一控制台中同时看到 `Codex` 和 `opencode` 的 observer 事件
+- 是否已经可以回答“它刚才做了哪些步骤、停在哪、用了什么能力”
 
-## 12. 当前建议
+## 13. 当前建议
 
 当前已经足够明确进入下一阶段：
 
 - 先开 `add-codex-app-server-observer`
 - 先做 CLI/host 最小验证入口
-- 控制台接入放到第二刀
+- 再把 `Codex` 与 `opencode` 以统一 observer 语义接入 Stitch 控制台
+- 始终避免回到旧 attach 心智去扩页面
 
-这能确保 `Codex` 路线终于从“不断修 attach 失败”切换成“沿官方接入面稳定推进”。
+这能确保 `Codex` 路线终于从“不断修 attach 失败”切换成“沿官方接入面稳定推进”，同时也让 `opencode` 在产品面上不再成为另一套平行世界。

@@ -11,8 +11,6 @@ use tungstenite::client::{IntoClientRequest, client as ws_client};
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Error as WsError, Message, WebSocket};
 
-use crate::attach::PROCESS_PID_EXPRESSION;
-
 /// Replaceable instrumentation runtime adapter.
 /// Production implementations call a real dynamic instrumentation backend;
 /// test implementations return controlled results.
@@ -135,6 +133,23 @@ const INSPECTOR_HTTP_WRITE_TIMEOUT: Duration = Duration::from_millis(500);
 const INSPECTOR_WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const INSPECTOR_WS_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 const INSPECTOR_BRIDGE_READ_TIMEOUT: Duration = Duration::from_millis(250);
+const PROCESS_PID_EXPRESSION: &str = r#"
+(() => {
+  if (typeof process !== "undefined" && process && process.pid) {
+    return process.pid;
+  }
+  if (typeof globalThis !== "undefined" && globalThis.process && globalThis.process.pid) {
+    return globalThis.process.pid;
+  }
+  try {
+    return require("process").pid;
+  } catch (_) {}
+  try {
+    return require("node:process").pid;
+  } catch (_) {}
+  return undefined;
+})()
+"#;
 const TRIGGER_DETACH_EXPRESSION: &str = r#"
 (() => {
   if (typeof globalThis.__prismtraceDetach === "function") {

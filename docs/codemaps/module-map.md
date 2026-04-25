@@ -6,7 +6,7 @@ _Last refreshed: 2026-04-18_
 
 | Module | Path | Responsibility |
 | --- | --- | --- |
-| prismtrace-core | `crates/prismtrace-core` | 共享领域模型：runtime kind、process sample、process target、probe health |
+| prismtrace-core | `crates/prismtrace-core` | 共享领域模型：runtime kind、process sample、process target、IPC message |
 | prismtrace-storage | `crates/prismtrace-storage` | 本地状态目录布局与初始化 |
 | prismtrace-host | `crates/prismtrace-host` | host 启动入口、process discovery service、本地 discovery 报告 |
 
@@ -28,5 +28,5 @@ _Last refreshed: 2026-04-18_
 
 - 新增或调整 runtime 分类、process target 字段：改 `prismtrace-core`
 - 新增本地状态文件/目录、db 路径布局：改 `prismtrace-storage`
-- 新增 host 参数、CLI 入口、discovery / attach / API surface：改 `prismtrace-host`
+- 新增 host 参数、CLI 入口、discovery / observer / console surface：改 `prismtrace-host`
 - 涉及产品边界、需求、实现任务拆分：改 `openspec/changes/<change>/`

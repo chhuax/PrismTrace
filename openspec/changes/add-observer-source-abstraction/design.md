@@ -2,13 +2,14 @@
 
 ## Summary
 
-新增一层统一的 source backend 抽象，让 `PrismTrace` 可以同时承载：
+新增一层统一的 source backend 抽象，让 `PrismTrace` 只围绕当前可行的观测接入面扩展：
 
-- `AttachProbeSource`
 - `CodexAppServerSource`
-- 后续的 `OpencodeServerSource`
+- `OpencodeServerSource`
+- `ClaudeCodeTranscriptSource`
+- 后续其他 `ExportReplaySource` / `RuntimeEventSource`
 
-并将这些不同来源统一投影到高层 `ObserverEvent` 语义，而不是强迫所有 source 都先还原成 HTTP request/response。
+统一层的目标是把这些不同来源投影到高层 `ObserverEvent` 语义，而不是继续围绕 attach 控制流设计产品和 host 架构。
 
 ## Architecture
 
@@ -42,19 +43,21 @@
 
 ## Migration
 
-### Attach route
+### Legacy attach route
 
-现有 attach/probe 路线继续保留，但其定位改为：
-
-- `AttachProbeSource`
+历史 attach/probe 路线不再属于当前 `prismtrace-host` 产品面，也不再作为统一 source abstraction 的目标实现。
 
 ### Codex
 
-现有 `Codex observer` 最小实现继续推进，但后续应对齐到统一 source 抽象。
+现有 `Codex observer` 实现继续推进，并对齐统一 source 抽象。
 
 ### opencode
 
 后续新增 `OpencodeServerSource`，优先从 `server + event/export` 入手。
+
+### Claude Code
+
+后续新增 `ClaudeCodeTranscriptSource`，优先从 transcript / event / export 入手。
 
 ## Risks
 
@@ -62,7 +65,7 @@
 
 应对：
 
-- 第一版只覆盖已经在 `Codex` 和 `opencode` 中都能自然表达的高层语义
+- 第一版只覆盖已经在 `Codex`、`opencode`、`Claude Code` 中都能自然表达的高层语义
 
 ### 风险 2：现有 request/response 体系和统一事件层重复
 

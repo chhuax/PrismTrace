@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>PrismTrace Observer Console Overview</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+      rel="stylesheet"
+    />
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "primary-fixed-dim": "#C0D5FF",
+              "secondary-fixed-dim": "#CFD4E4",
+              "surface-bright": "#212C40",
+              "on-tertiary-fixed": "#383751",
+              outline: "#6C768A",
+              "surface-container-lowest": "#000000",
+              "on-secondary-fixed": "#393F4C",
+              "surface-dim": "#0B0E14",
+              "on-error": "#490106",
+              "inverse-primary": "#005EB8",
+              background: "#0B0E14",
+              "tertiary-fixed-dim": "#CBC9E9",
+              "on-background": "#DCE5FD",
+              "surface-container-highest": "#1D2637",
+              "tertiary-dim": "#CBC9E9",
+              "outline-variant": "#3F485A",
+              error: "#EE7D77",
+              "tertiary-container": "#D9D7F8",
+              "on-secondary-container": "#BABFCE",
+              "on-tertiary-fixed-variant": "#54536F",
+              "on-error-container": "#FF9993",
+              "on-surface-variant": "#A2ABC1",
+              surface: "#0B0E14",
+              "secondary-dim": "#989EAC",
+              "secondary-container": "#363C48",
+              primary: "#A9C7FF",
+              "surface-container-high": "#18202E",
+              "error-dim": "#BB5551",
+              "on-primary-container": "#B9D1FF",
+              tertiary: "#E8E5FF",
+              "on-secondary-fixed-variant": "#565C69",
+              "inverse-surface": "#F9F9FF",
+              "on-primary": "#003F80",
+              "inverse-on-surface": "#52555C",
+              "secondary-fixed": "#DDE2F2",
+              "tertiary-fixed": "#D9D7F8",
+              "surface-container-low": "#0F131C",
+              "primary-container": "#00468C",
+              "on-tertiary-container": "#4B4A65",
+              "primary-fixed": "#D6E3FF",
+              secondary: "#989EAC",
+              "primary-dim": "#92BAFF",
+              "surface-container": "#141A25",
+              "error-container": "#7F2927",
+              "on-surface": "#DCE5FD",
+              "surface-variant": "#1D2637",
+              "on-secondary": "#1A202C",
+              "on-primary-fixed-variant": "#005AB2",
+              "on-primary-fixed": "#003E7E",
+              "surface-tint": "#A9C7FF",
+              "on-tertiary": "#53526E"
+            },
+            borderRadius: {
+              DEFAULT: "0.25rem",
+              lg: "0.5rem",
+              xl: "0.75rem",
+              full: "9999px"
+            },
+            fontFamily: {
+              headline: ["Inter"],
+              display: ["Inter"],
+              body: ["Inter"],
+              label: ["Inter"],
+              mono: ["JetBrains Mono", "monospace"]
+            }
+          }
+        }
+      };
+    </script>
+    <style>
+      body {
+        font-family: "Inter", sans-serif;
+      }
+
+      .font-mono {
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      .machined-border-b {
+        border-bottom: 1px solid rgba(63, 72, 90, 0.3);
+      }
+
+      .machined-border-r {
+        border-right: 1px solid rgba(63, 72, 90, 0.3);
+      }
+
+      .machined-border-l {
+        border-left: 1px solid rgba(63, 72, 90, 0.3);
+      }
+
+      .well-shadow {
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+      }
+
+      .theme-button-active {
+        background: #00468c;
+        color: #b9d1ff;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+      }
+    </style>
+  </head>
+  <body
+    class="bg-background text-on-background h-screen overflow-hidden flex flex-col"
+    data-theme="dark"
+    data-initial-session-id="__INITIAL_SESSION_ID__"
+    data-initial-request-id="__INITIAL_REQUEST_ID__"
+  >
+    <header
+      class="fixed top-0 w-full flex items-center justify-between px-4 h-12 z-50 bg-[#0B0E14]/90 backdrop-blur-xl border-b border-slate-700/30 shadow-sm"
+    >
+      <div class="flex items-center gap-6">
+        <span class="text-lg font-black tracking-[-0.05em] text-[#DCE5FD]">PRISMTRACE</span>
+        <nav class="hidden md:flex gap-4 h-full items-center">
+          <a
+            class="text-blue-400 border-b-2 border-blue-400 pb-1 font-['Inter'] text-[12px] tracking-[0.1em] uppercase h-full flex items-center mt-[2px] hover:bg-blue-500/5 transition-colors scale-95 duration-100"
+            href="#"
+          >
+            Dashboard
+          </a>
+          <a
+            class="text-slate-500 font-mono font-['Inter'] text-[12px] tracking-[0.1em] uppercase h-full flex items-center hover:bg-blue-500/5 transition-colors scale-95 duration-100"
+            href="#"
+          >
+            Monitor
+          </a>
+          <a
+            class="text-slate-500 font-mono font-['Inter'] text-[12px] tracking-[0.1em] uppercase h-full flex items-center hover:bg-blue-500/5 transition-colors scale-95 duration-100"
+            href="#"
+          >
+            Analytics
+          </a>
+        </nav>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="flex items-center gap-2">
+          <div class="flex bg-surface-container-lowest rounded-sm p-0.5 outline outline-1 outline-outline-variant/30">
+            <button
+              class="px-2 py-0.5 text-[10px] font-mono uppercase text-on-surface-variant hover:text-on-surface transition-colors"
+              data-theme-switch="light"
+              type="button"
+            >
+              Light
+            </button>
+            <button
+              class="px-2 py-0.5 text-[10px] font-mono uppercase rounded-sm transition-colors"
+              data-theme-switch="dark"
+              type="button"
+            >
+              Dark
+            </button>
+          </div>
+          <div class="flex bg-surface-container-lowest rounded-sm p-0.5 outline outline-1 outline-outline-variant/30">
+            <button
+              class="px-2 py-0.5 text-[10px] font-mono uppercase rounded-sm theme-button-active"
+              data-language-switch="zh"
+              type="button"
+            >
+              中文
+            </button>
+            <button
+              class="px-2 py-0.5 text-[10px] font-mono uppercase text-on-surface-variant hover:text-on-surface transition-colors"
+              data-language-switch="en"
+              type="button"
+            >
+              EN
+            </button>
+          </div>
+        </div>
+        <div class="hidden" id="theme-switch-region">__THEME_SWITCHER_HTML__</div>
+      </div>
+    </header>
+    <div class="flex flex-1 pt-12 overflow-hidden">
+      <nav
+        class="fixed left-0 top-12 h-[calc(100vh-3rem)] flex flex-col pt-4 z-40 bg-[#0F131C] w-64 border-r border-slate-700/30 font-['JetBrains_Mono'] text-[10px] tracking-widest text-slate-500 transition-all duration-200 ease-in-out"
+      >
+        <div class="px-4 pb-6 machined-border-b mb-2">
+          <div class="flex items-center gap-3">
+            <div
+              class="w-8 h-8 rounded bg-surface-container-highest flex items-center justify-center outline outline-1 outline-outline-variant/30"
+            >
+              <span class="material-symbols-outlined text-[16px] text-primary">account_circle</span>
+            </div>
+            <div>
+              <div class="text-[10px] font-mono text-on-surface uppercase">OBSERVER_01</div>
+              <div class="text-[9px] font-mono text-emerald-400 uppercase flex items-center gap-1 mt-0.5">
+                <div class="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>
+                STATUS: ACTIVE
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="bg-blue-500/10 text-blue-400 border-l-2 border-blue-400 flex items-center px-4 py-3 hover:bg-slate-800/50" href="#">
+          <span class="material-symbols-outlined mr-3 text-[16px]" style="font-variation-settings: 'FILL' 1;">database</span>
+          SOURCES
+        </a>
+        <a class="text-slate-500 flex items-center px-4 py-3 hover:bg-slate-800/50" href="#">
+          <span class="material-symbols-outlined mr-3 text-[16px]">analytics</span>
+          ACTIVITY
+        </a>
+        <a class="text-slate-500 flex items-center px-4 py-3 hover:bg-slate-800/50" href="#">
+          <span class="material-symbols-outlined mr-3 text-[16px]">history</span>
+          SESSIONS
+        </a>
+        <div class="px-4 py-3 hidden" id="filter-context-region">__FILTER_CONTEXT_HTML__</div>
+        <div class="mt-8 px-4">
+          <div class="text-[9px] font-mono uppercase tracking-widest text-on-surface-variant mb-3">Active Sources</div>
+          <div class="space-y-1" id="targets-region">__TARGETS_HTML__</div>
+        </div>
+        <div class="hidden" id="activity-region">__ACTIVITY_HTML__</div>
+        <div class="hidden" id="sessions-region"></div>
+      </nav>
+      <main class="flex-1 ml-64 flex overflow-hidden bg-surface">
+        <div class="flex-1 flex flex-col min-w-0 machined-border-r bg-surface-dim">
+          <div class="h-10 px-4 flex items-center justify-between machined-border-b bg-surface-container-low shrink-0">
+            <h2 class="text-[10px] font-mono uppercase tracking-widest text-on-surface">Unified Telemetry Feed</h2>
+            <div class="flex gap-2">
+              <button class="p-1 rounded hover:bg-surface-container-highest text-on-surface-variant" type="button">
+                <span class="material-symbols-outlined text-[14px]">filter_list</span>
+              </button>
+              <button class="p-1 rounded hover:bg-surface-container-highest text-on-surface-variant" type="button">
+                <span class="material-symbols-outlined text-[14px]">search</span>
+              </button>
+            </div>
+          </div>
+          <div class="flex-1 overflow-auto p-4 bg-surface-container-lowest well-shadow">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="text-[9px] font-mono uppercase text-on-surface-variant machined-border-b bg-surface-container-lowest sticky top-0 z-10">
+                  <th class="pb-2 font-normal">Time</th>
+                  <th class="pb-2 font-normal">Source</th>
+                  <th class="pb-2 font-normal">Kind</th>
+                  <th class="pb-2 font-normal">Summary</th>
+                  <th class="pb-2 font-normal text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody class="text-[12px] font-mono" id="requests-region">__REQUESTS_HTML__</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="w-80 shrink-0 flex flex-col bg-surface-container-high overflow-y-auto">
+          <div class="p-4 machined-border-b" id="health-region">__HEALTH_HTML__</div>
+          <div class="p-4 machined-border-b" id="timeline-region">__SESSIONS_HTML__</div>
+          <div class="p-4 bg-surface-container-low flex-1" id="request-detail-region">__REQUEST_DETAIL_HTML__</div>
+          <div class="hidden" id="session-detail-region">__SESSION_TIMELINE_HTML__</div>
+        </div>
+      </main>
+    </div>
+    <script src="/assets/console.js"></script>
+  </body>
+</html>

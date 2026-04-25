@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PrismTrace - Events Empty State</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;700&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-tertiary-container": "#4B4A65",
+                        "on-primary-fixed": "#003E7E",
+                        "secondary-container": "#363C48",
+                        "outline-variant": "#3F485A",
+                        "surface-container-lowest": "#000000",
+                        "on-primary-container": "#B9D1FF",
+                        "on-secondary-container": "#BABFCE",
+                        "primary-container": "#00468C",
+                        "tertiary-fixed": "#D9D7F8",
+                        "surface-container": "#141A25",
+                        "on-secondary-fixed-variant": "#565C69",
+                        "tertiary-fixed-dim": "#CBC9E9",
+                        "outline": "#6C768A",
+                        "on-tertiary": "#53526E",
+                        "tertiary-dim": "#CBC9E9",
+                        "on-primary-fixed-variant": "#005AB2",
+                        "tertiary": "#E8E5FF",
+                        "on-error": "#490106",
+                        "secondary-fixed-dim": "#CFD4E4",
+                        "on-primary": "#003F80",
+                        "background": "#0B0E14",
+                        "primary-fixed-dim": "#C0D5FF",
+                        "surface-dim": "#0B0E14",
+                        "primary": "#A9C7FF",
+                        "secondary-dim": "#989EAC",
+                        "on-background": "#DCE5FD",
+                        "surface": "#0B0E14",
+                        "on-error-container": "#FF9993",
+                        "on-tertiary-fixed": "#383751",
+                        "on-surface-variant": "#A2ABC1",
+                        "inverse-primary": "#005EB8",
+                        "secondary": "#989EAC",
+                        "inverse-surface": "#F9F9FF",
+                        "surface-bright": "#212C40",
+                        "on-tertiary-fixed-variant": "#54536F",
+                        "inverse-on-surface": "#52555C",
+                        "tertiary-container": "#D9D7F8",
+                        "primary-fixed": "#D6E3FF",
+                        "surface-tint": "#A9C7FF",
+                        "primary-dim": "#92BAFF",
+                        "surface-container-highest": "#1D2637",
+                        "on-surface": "#DCE5FD",
+                        "error": "#EE7D77",
+                        "error-container": "#7F2927",
+                        "error-dim": "#BB5551",
+                        "on-secondary-fixed": "#393F4C",
+                        "surface-container-low": "#0F131C",
+                        "secondary-fixed": "#DDE2F2",
+                        "surface-container-high": "#18202E",
+                        "on-secondary": "#1A202C",
+                        "surface-variant": "#1D2637"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {},
+                    "fontFamily": {
+                        "headline": ["Inter", "sans-serif"],
+                        "display": ["Inter", "sans-serif"],
+                        "body": ["Inter", "sans-serif"],
+                        "label": ["Inter", "sans-serif"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    },
+                    "fontSize": {}
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: theme('colors.background');
+            color: theme('colors.on-background');
+        }
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col overflow-hidden text-sm">
+<!-- TopAppBar -->
+<header class="bg-[#0B0E14]/90 backdrop-blur-xl flex justify-between items-center px-4 w-full full-width top-0 z-50 h-12 border-b border-[#3F485A]/30 shadow-sm transition-all duration-150 ease-in-out shrink-0">
+<div class="flex items-center gap-6">
+<div class="text-lg font-bold tracking-[-0.05em] text-[#DCE5FD] font-headline">OBSIDIAN_OBS</div>
+<nav class="hidden md:flex gap-4 h-full">
+<a class="font-mono text-[10px] uppercase tracking-[0.1em] text-[#989EAC] hover:bg-[#5E9EFF]/5 hover:text-[#DCE5FD] h-12 flex items-center px-2 transition-colors" href="#">DASHBOARD</a>
+<a class="font-mono text-[10px] uppercase tracking-[0.1em] text-[#5E9EFF] border-b-2 border-[#5E9EFF] pb-1 hover:bg-[#5E9EFF]/5 hover:text-[#DCE5FD] h-12 flex items-center px-2 transition-colors" href="#">EVENTS</a>
+<a class="font-mono text-[10px] uppercase tracking-[0.1em] text-[#989EAC] hover:bg-[#5E9EFF]/5 hover:text-[#DCE5FD] h-12 flex items-center px-2 transition-colors" href="#">TOPOLOGY</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="relative hidden sm:block">
+<span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-[16px] text-outline">search</span>
+<input class="bg-surface-container-low border border-outline-variant/30 rounded text-on-surface text-xs pl-8 pr-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary w-48 placeholder-outline transition-shadow font-mono" placeholder="Search..." type="text"/>
+</div>
+<div class="flex items-center gap-2 border-l border-outline-variant/30 pl-4">
+<button class="text-on-surface-variant hover:text-on-surface hover:bg-primary/5 p-1 rounded transition-colors" title="terminal">
+<span class="material-symbols-outlined text-[18px]">terminal</span>
+</button>
+<button class="text-on-surface-variant hover:text-on-surface hover:bg-primary/5 p-1 rounded transition-colors" title="settings">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+</button>
+<button class="text-on-surface-variant hover:text-on-surface hover:bg-primary/5 p-1 rounded transition-colors" title="notifications">
+<span class="material-symbols-outlined text-[18px]">notifications</span>
+</button>
+</div>
+<div class="flex items-center gap-2 ml-2">
+<button class="bg-surface-container border border-outline-variant/40 text-on-surface text-[10px] font-mono uppercase tracking-[0.1em] px-3 py-1.5 rounded-[2px] hover:bg-surface-container-highest transition-colors">SYNC_ENV</button>
+<button class="bg-primary text-on-primary text-[10px] font-mono uppercase tracking-[0.1em] px-3 py-1.5 rounded-[2px] hover:bg-primary-dim transition-colors">DEPLOY_NODE</button>
+<img alt="Operator Profile" class="w-7 h-7 rounded-full border border-outline-variant/30 ml-2" data-alt="minimalist geometric avatar for system operator" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAPL_UYBHE56Cc3CPS-qeWHnD-uEw_Ve_RNhvOAVpQPr_-tSY1VVpwCCa9JzuQGr7-k8zuspmehiBkIO3F9ob_wl8UbxkxbfcJwhjEsfLX31Nt3L9iEJ_M7_DyLi2z3c3i-6MuyEbTLZ5iXNo4QJrUGxTuK1wD526-MjtB0OQ_fX9fjmRrN2pIqxfGOXPxGFvCMAUvrkNIJ5JR0o5CH-q6kAyGV_FF3f_lPCR0LQOvzp0mHc6JocJIbPYSroG0jx3yddO37fNKaGVE"/>
+</div>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden">
+<!-- SideNavBar -->
+<aside class="bg-[#18202E] h-full w-64 border-r border-[#3F485A]/30 flex flex-col py-6 shrink-0 z-40 transition-colors duration-75 relative hidden md:flex" style="box-shadow: inset 0 2px 4px rgba(0,0,0,0.4);">
+<div class="px-4 mb-6 flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-surface-container-low border border-outline-variant/30 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[18px]">admin_panel_settings</span>
+</div>
+<div>
+<div class="text-sm font-bold text-[#DCE5FD] font-headline tracking-[-0.02em]">CONSOLE_ROOT</div>
+<div class="font-mono text-[9px] uppercase tracking-[0.1em] text-secondary">v4.0.2-stable</div>
+</div>
+</div>
+<nav class="flex-1 overflow-y-auto">
+<div class="mb-6">
+<div class="px-4 font-mono text-[9px] uppercase tracking-[0.1em] text-outline mb-2">Sources</div>
+<a class="flex items-center gap-3 text-[#989EAC] px-4 py-2 hover:bg-[#0F131C] hover:text-[#DCE5FD] transition-colors text-xs font-mono" href="#">
+<span class="material-symbols-outlined text-[16px]">database</span>
+                        Codex App Server
+                        <span class="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+</a>
+<a class="flex items-center gap-3 text-[#989EAC] px-4 py-2 hover:bg-[#0F131C] hover:text-[#DCE5FD] transition-colors text-xs font-mono" href="#">
+<span class="material-symbols-outlined text-[16px]">api</span>
+                        opencode
+                        <span class="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+</a>
+</div>
+<div class="mb-6">
+<a class="flex items-center gap-3 bg-[#5E9EFF]/5 text-[#5E9EFF] border-r-2 border-[#5E9EFF] px-4 py-3 transition-colors text-xs font-mono" href="#">
+<span class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;">analytics</span>
+                        Activity
+                    </a>
+<a class="flex items-center gap-3 text-[#989EAC] px-4 py-3 hover:bg-[#0F131C] hover:text-[#DCE5FD] transition-colors text-xs font-mono" href="#">
+<span class="material-symbols-outlined text-[16px]">history</span>
+                        Sessions
+                    </a>
+</div>
+</nav>
+<div class="px-4 mt-auto mb-4">
+<button class="w-full bg-surface-container border border-outline-variant/40 text-on-surface text-[10px] font-mono uppercase tracking-[0.1em] px-3 py-2 rounded-[2px] hover:bg-surface-container-highest transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[14px]">assessment</span>
+                    GENERATE_REPORT
+                </button>
+</div>
+<div class="border-t border-outline-variant/30 pt-4 flex flex-col">
+<a class="flex items-center gap-3 text-[#989EAC] px-4 py-2 hover:bg-[#0F131C] hover:text-[#DCE5FD] transition-colors text-xs font-mono" href="#">
+<span class="material-symbols-outlined text-[16px]">help</span>
+                    Documentation
+                </a>
+<a class="flex items-center gap-3 text-[#989EAC] px-4 py-2 hover:bg-[#0F131C] hover:text-[#DCE5FD] transition-colors text-xs font-mono" href="#">
+<span class="material-symbols-outlined text-[16px]">contact_support</span>
+                    Support
+                </a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex overflow-hidden bg-surface-container-lowest">
+<!-- Center Column (Empty State) -->
+<div class="flex-1 flex flex-col border-r border-outline-variant/30 h-full overflow-hidden relative">
+<!-- Toolbar -->
+<div class="h-10 border-b border-outline-variant/30 flex items-center px-4 bg-surface justify-between shrink-0">
+<div class="font-mono text-[10px] uppercase tracking-[0.1em] text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px] text-primary">dynamic_feed</span>
+                        UNIFIED TELEMETRY FEED
+                    </div>
+<div class="flex gap-2">
+<button class="text-on-surface-variant hover:text-on-surface transition-colors p-1 rounded hover:bg-surface-container">
+<span class="material-symbols-outlined text-[16px]">filter_list</span>
+</button>
+<button class="text-on-surface-variant hover:text-on-surface transition-colors p-1 rounded hover:bg-surface-container">
+<span class="material-symbols-outlined text-[16px]">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Empty State Canvas -->
+<div class="flex-1 flex items-center justify-center p-8 bg-surface-container-lowest" style="box-shadow: inset 0 2px 4px rgba(0,0,0,0.4);">
+<div class="max-w-md w-full text-center flex flex-col items-center">
+<div class="w-24 h-24 rounded-full border border-outline-variant/30 flex items-center justify-center mb-6 relative bg-surface-container-low/50">
+<!-- Subtle Scanner/Waveform Graphic -->
+<div class="absolute inset-0 rounded-full border border-primary/20 animate-[pulse_4s_ease-in-out_infinite]"></div>
+<div class="absolute inset-2 rounded-full border border-primary/10 animate-[pulse_4s_ease-in-out_infinite_1s]"></div>
+<span class="material-symbols-outlined text-[40px] text-primary/60" style="font-variation-settings: 'wght' 200;">sensors</span>
+</div>
+<h2 class="font-headline text-lg font-bold text-on-surface mb-3 tracking-[-0.02em]">Awaiting Telemetry Data</h2>
+<p class="font-mono text-xs text-secondary leading-relaxed max-w-sm">
+                            No events matching current criteria. The system is actively listening for incoming telemetry. Events will appear here once the 'Codex App Server' or 'opencode' nodes transmit data based on your active filters.
+                        </p>
+<div class="mt-8 flex gap-3">
+<button class="bg-surface-container border border-outline-variant/40 text-on-surface text-[10px] font-mono uppercase tracking-[0.1em] px-4 py-2 rounded-[2px] hover:bg-surface-container-highest transition-colors">
+                                MODIFY FILTERS
+                            </button>
+<button class="bg-surface-container-low border border-outline-variant/40 text-on-surface text-[10px] font-mono uppercase tracking-[0.1em] px-4 py-2 rounded-[2px] hover:bg-surface-container-highest transition-colors">
+                                RUN TEST PING
+                            </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column (Inspector & Health) -->
+<aside class="w-80 bg-surface flex flex-col h-full shrink-0 overflow-y-auto">
+<!-- Inspector Section -->
+<div class="border-b border-outline-variant/30 flex-1 flex flex-col min-h-0">
+<div class="h-10 border-b border-outline-variant/30 flex items-center px-4 bg-surface-container-low justify-between shrink-0">
+<div class="font-mono text-[10px] uppercase tracking-[0.1em] text-on-surface">INSPECTOR_LOG</div>
+<button class="text-on-surface-variant hover:text-on-surface transition-colors p-1 rounded hover:bg-surface-container">
+<span class="material-symbols-outlined text-[14px]">open_in_new</span>
+</button>
+</div>
+<div class="flex-1 p-4 flex items-center justify-center bg-surface-container-lowest" style="box-shadow: inset 0 2px 4px rgba(0,0,0,0.4);">
+<div class="text-center">
+<span class="material-symbols-outlined text-[24px] text-outline mb-2">find_in_page</span>
+<div class="font-mono text-xs text-outline">Select an event in the feed<br/>to view detailed payload.</div>
+</div>
+</div>
+</div>
+<!-- Temporal Timeline -->
+<div class="border-b border-outline-variant/30 flex-1 flex flex-col min-h-0">
+<div class="h-10 border-b border-outline-variant/30 flex items-center px-4 bg-surface-container-low justify-between shrink-0">
+<div class="font-mono text-[10px] uppercase tracking-[0.1em] text-on-surface">TEMPORAL TIMELINE</div>
+<span class="material-symbols-outlined text-[14px] text-outline">schedule</span>
+</div>
+<div class="flex-1 p-4 flex flex-col justify-center bg-surface-container-lowest" style="box-shadow: inset 0 2px 4px rgba(0,0,0,0.4);">
+<div class="relative h-px w-full bg-outline-variant/30 mb-4">
+<div class="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full border border-primary bg-surface-container-lowest"></div>
+</div>
+<div class="text-center font-mono text-[10px] text-outline">LIVE FEED ACTIVE (NO DATA YET)</div>
+</div>
+</div>
+<!-- Health Card -->
+<div class="p-4 bg-surface-container-high shrink-0">
+<div class="font-mono text-[10px] uppercase tracking-[0.1em] text-outline mb-3">OBSERVABILITY HEALTH</div>
+<div class="flex items-center gap-4">
+<div class="relative w-12 h-12 flex items-center justify-center">
+<svg class="w-full h-full -rotate-90" viewbox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
+<circle class="stroke-outline-variant/30" cx="18" cy="18" fill="none" r="16" stroke-dasharray="100 100" stroke-linecap="round" stroke-width="2"></circle>
+<circle class="stroke-emerald-400" cx="18" cy="18" fill="none" r="16" stroke-dasharray="100 100" stroke-linecap="round" stroke-width="2"></circle>
+</svg>
+<div class="absolute font-mono text-xs font-bold text-on-surface">100%</div>
+</div>
+<div>
+<div class="font-headline text-sm font-bold text-on-surface">System Nominal</div>
+<div class="font-mono text-[10px] text-secondary mt-1">All collectors reporting healthy.</div>
+</div>
+</div>
+</div>
+</aside>
+</main>
+</div>
+</body></html>

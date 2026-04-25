@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PrismTrace Observer Console Overview</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&amp;family=JetBrains+Mono:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "primary-fixed-dim": "#C0D5FF",
+                    "secondary-fixed-dim": "#CFD4E4",
+                    "surface-bright": "#212C40",
+                    "on-tertiary-fixed": "#383751",
+                    "outline": "#6C768A",
+                    "surface-container-lowest": "#000000",
+                    "on-secondary-fixed": "#393F4C",
+                    "surface-dim": "#0B0E14",
+                    "on-error": "#490106",
+                    "inverse-primary": "#005EB8",
+                    "background": "#0B0E14",
+                    "tertiary-fixed-dim": "#CBC9E9",
+                    "on-background": "#DCE5FD",
+                    "surface-container-highest": "#1D2637",
+                    "tertiary-dim": "#CBC9E9",
+                    "outline-variant": "#3F485A",
+                    "error": "#EE7D77",
+                    "tertiary-container": "#D9D7F8",
+                    "on-secondary-container": "#BABFCE",
+                    "on-tertiary-fixed-variant": "#54536F",
+                    "on-error-container": "#FF9993",
+                    "on-surface-variant": "#A2ABC1",
+                    "surface": "#0B0E14",
+                    "secondary-dim": "#989EAC",
+                    "secondary-container": "#363C48",
+                    "primary": "#A9C7FF",
+                    "surface-container-high": "#18202E",
+                    "error-dim": "#BB5551",
+                    "on-primary-container": "#B9D1FF",
+                    "tertiary": "#E8E5FF",
+                    "on-secondary-fixed-variant": "#565C69",
+                    "inverse-surface": "#F9F9FF",
+                    "on-primary": "#003F80",
+                    "inverse-on-surface": "#52555C",
+                    "secondary-fixed": "#DDE2F2",
+                    "tertiary-fixed": "#D9D7F8",
+                    "surface-container-low": "#0F131C",
+                    "primary-container": "#00468C",
+                    "on-tertiary-container": "#4B4A65",
+                    "primary-fixed": "#D6E3FF",
+                    "secondary": "#989EAC",
+                    "primary-dim": "#92BAFF",
+                    "surface-container": "#141A25",
+                    "error-container": "#7F2927",
+                    "on-surface": "#DCE5FD",
+                    "surface-variant": "#1D2637",
+                    "on-secondary": "#1A202C",
+                    "on-primary-fixed-variant": "#005AB2",
+                    "on-primary-fixed": "#003E7E",
+                    "surface-tint": "#A9C7FF",
+                    "on-tertiary": "#53526E"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {},
+            "fontFamily": {
+                    "headline": [
+                            "Inter"
+                    ],
+                    "display": [
+                            "Inter"
+                    ],
+                    "body": [
+                            "Inter"
+                    ],
+                    "label": [
+                            "Inter"
+                    ]
+            },
+            "fontSize": {}
+    },
+        },
+      }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .machined-border-b { border-bottom: 1px solid rgba(63, 72, 90, 0.3); }
+        .machined-border-r { border-right: 1px solid rgba(63, 72, 90, 0.3); }
+        .machined-border-l { border-left: 1px solid rgba(63, 72, 90, 0.3); }
+        .machined-border-t { border-top: 1px solid rgba(63, 72, 90, 0.3); }
+        .well-shadow { box-shadow: inset 0 2px 4px rgba(0,0,0,0.4); }
+    </style>
+</head>
+<body class="bg-background text-on-background h-screen overflow-hidden flex flex-col">
+<!-- TopNavBar -->
+<header class="fixed top-0 w-full flex items-center justify-between px-4 h-12 z-50 bg-[#0B0E14]/90 backdrop-blur-xl border-b border-slate-700/30 shadow-sm">
+<div class="flex items-center gap-6">
+<span class="text-lg font-black tracking-[-0.05em] text-[#DCE5FD]">PRISMTRACE</span>
+<nav class="hidden md:flex gap-4 h-full items-center">
+<a class="text-blue-400 border-b-2 border-blue-400 pb-1 font-['Inter'] text-[12px] tracking-[0.1em] uppercase h-full flex items-center mt-[2px] hover:bg-blue-500/5 transition-colors scale-95 duration-100" href="#">DASHBOARD</a>
+<a class="text-slate-500 font-mono font-['Inter'] text-[12px] tracking-[0.1em] uppercase h-full flex items-center hover:bg-blue-500/5 transition-colors scale-95 duration-100" href="#">MONITOR</a>
+<a class="text-slate-500 font-mono font-['Inter'] text-[12px] tracking-[0.1em] uppercase h-full flex items-center hover:bg-blue-500/5 transition-colors scale-95 duration-100" href="#">ANALYTICS</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<!-- Segmented Controls -->
+<div class="flex items-center gap-2">
+<div class="flex bg-surface-container-lowest rounded-sm p-0.5 outline outline-1 outline-outline-variant/30">
+<button class="px-2 py-0.5 text-[10px] font-mono uppercase text-on-surface-variant hover:text-on-surface">Light</button>
+<button class="px-2 py-0.5 text-[10px] font-mono uppercase bg-primary-container text-on-primary-container rounded-sm shadow-sm">Dark</button>
+</div>
+<div class="flex bg-surface-container-lowest rounded-sm p-0.5 outline outline-1 outline-outline-variant/30">
+<button class="px-2 py-0.5 text-[10px] font-mono uppercase bg-primary-container text-on-primary-container rounded-sm shadow-sm">中文</button>
+<button class="px-2 py-0.5 text-[10px] font-mono uppercase text-on-surface-variant hover:text-on-surface">EN</button>
+</div>
+</div>
+<div class="flex items-center gap-2 text-slate-500">
+<button class="hover:bg-blue-500/5 p-1 rounded transition-colors scale-95 duration-100"><span class="material-symbols-outlined text-[18px]">dark_mode</span></button>
+<button class="hover:bg-blue-500/5 p-1 rounded transition-colors scale-95 duration-100"><span class="material-symbols-outlined text-[18px]">language</span></button>
+<button class="hover:bg-blue-500/5 p-1 rounded transition-colors scale-95 duration-100"><span class="material-symbols-outlined text-[18px]">settings</span></button>
+</div>
+</div>
+</header>
+<div class="flex flex-1 pt-12 overflow-hidden">
+<!-- SideNavBar -->
+<nav class="fixed left-0 top-12 h-[calc(100vh-3rem)] flex flex-col pt-4 z-40 bg-[#0F131C] docked left-0 h-screen w-64 border-r border-slate-700/30 flat no shadows font-['JetBrains_Mono'] text-[10px] tracking-widest text-slate-500 transition-all duration-200 ease-in-out">
+<div class="px-4 pb-6 machined-border-b mb-2">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-surface-container-highest flex items-center justify-center outline outline-1 outline-outline-variant/30">
+<span class="material-symbols-outlined text-[16px] text-primary">account_circle</span>
+</div>
+<div>
+<div class="text-[10px] font-mono text-on-surface uppercase">OBSERVER_01</div>
+<div class="text-[9px] font-mono text-emerald-400 uppercase flex items-center gap-1 mt-0.5"><div class="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>STATUS: ACTIVE</div>
+</div>
+</div>
+</div>
+<a class="bg-blue-500/10 text-blue-400 border-l-2 border-blue-400 flex items-center px-4 py-3 hover:bg-slate-800/50" href="#">
+<span class="material-symbols-outlined mr-3 text-[16px]" style="font-variation-settings: 'FILL' 1;">database</span>
+                SOURCES
+            </a>
+<a class="text-slate-500 flex items-center px-4 py-3 hover:bg-slate-800/50" href="#">
+<span class="material-symbols-outlined mr-3 text-[16px]">analytics</span>
+                ACTIVITY
+            </a>
+<a class="text-slate-500 flex items-center px-4 py-3 hover:bg-slate-800/50" href="#">
+<span class="material-symbols-outlined mr-3 text-[16px]">history</span>
+                SESSIONS
+            </a>
+<!-- Module Specific to Prompt: Sources -->
+<div class="mt-8 px-4">
+<div class="text-[9px] font-mono uppercase tracking-widest text-on-surface-variant mb-3">Active Sources</div>
+<div class="space-y-1">
+<div class="flex items-center justify-between py-1.5 px-2 bg-surface-container-highest rounded-sm outline outline-1 outline-outline-variant/30">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px] text-primary">terminal</span>
+<span class="text-[10px] font-mono text-on-surface">Codex App Server</span>
+</div>
+<div class="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>
+</div>
+<div class="flex items-center justify-between py-1.5 px-2 hover:bg-surface-container-highest/50 rounded-sm">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px] text-outline">code</span>
+<span class="text-[10px] font-mono text-outline">opencode</span>
+</div>
+<div class="w-1.5 h-1.5 rounded-full bg-outline"></div>
+</div>
+</div>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 ml-64 flex overflow-hidden bg-surface">
+<!-- Center Column: Unified Telemetry Feed -->
+<div class="flex-1 flex flex-col min-w-0 machined-border-r bg-surface-dim">
+<div class="h-10 px-4 flex items-center justify-between machined-border-b bg-surface-container-low shrink-0">
+<h2 class="text-[10px] font-mono uppercase tracking-widest text-on-surface">Unified Telemetry Feed</h2>
+<div class="flex gap-2">
+<button class="p-1 rounded hover:bg-surface-container-highest text-on-surface-variant"><span class="material-symbols-outlined text-[14px]">filter_list</span></button>
+<button class="p-1 rounded hover:bg-surface-container-highest text-on-surface-variant"><span class="material-symbols-outlined text-[14px]">search</span></button>
+</div>
+</div>
+<div class="flex-1 overflow-auto p-4 bg-surface-container-lowest well-shadow">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="text-[9px] font-mono uppercase text-on-surface-variant machined-border-b bg-surface-container-lowest sticky top-0 z-10">
+<th class="pb-2 font-normal">Time</th>
+<th class="pb-2 font-normal">Source</th>
+<th class="pb-2 font-normal">Kind</th>
+<th class="pb-2 font-normal">Summary</th>
+<th class="pb-2 font-normal text-right">Status</th>
+</tr>
+</thead>
+<tbody class="text-[12px] font-mono">
+<tr class="hover:bg-primary/5 machined-border-b cursor-pointer transition-colors">
+<td class="py-2 text-outline">14:02:11.004</td>
+<td class="py-2 text-primary">Codex App Server</td>
+<td class="py-2 text-tertiary-dim">REQ</td>
+<td class="py-2 text-on-surface truncate max-w-xs">GET /api/v1/metrics/aggregate</td>
+<td class="py-2 text-right"><span class="inline-flex items-center gap-1 text-[10px]"><div class="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>200 OK</span></td>
+</tr>
+<tr class="hover:bg-primary/5 machined-border-b cursor-pointer transition-colors">
+<td class="py-2 text-outline">14:02:10.892</td>
+<td class="py-2 text-primary">Codex App Server</td>
+<td class="py-2 text-error-dim">ERR</td>
+<td class="py-2 text-on-surface truncate max-w-xs">Failed to connect to db cluster 02</td>
+<td class="py-2 text-right"><span class="inline-flex items-center gap-1 text-[10px] text-error"><div class="w-1.5 h-1.5 rounded-full bg-error"></div>503 SV</span></td>
+</tr>
+<tr class="hover:bg-primary/5 machined-border-b cursor-pointer transition-colors bg-primary/5">
+<td class="py-2 text-outline">14:02:10.110</td>
+<td class="py-2 text-primary">Codex App Server</td>
+<td class="py-2 text-tertiary-dim">REQ</td>
+<td class="py-2 text-on-surface truncate max-w-xs">POST /api/v1/ingest/telemetry</td>
+<td class="py-2 text-right"><span class="inline-flex items-center gap-1 text-[10px]"><div class="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>202 ACC</span></td>
+</tr>
+<tr class="hover:bg-primary/5 machined-border-b cursor-pointer transition-colors">
+<td class="py-2 text-outline">14:02:09.554</td>
+<td class="py-2 text-outline">opencode</td>
+<td class="py-2 text-secondary-dim">SYS</td>
+<td class="py-2 text-on-surface truncate max-w-xs">Worker pool scaled down to 4</td>
+<td class="py-2 text-right"><span class="inline-flex items-center gap-1 text-[10px] text-outline"><div class="w-1.5 h-1.5 rounded-full bg-outline"></div>IDLE</span></td>
+</tr>
+<tr class="hover:bg-primary/5 machined-border-b cursor-pointer transition-colors">
+<td class="py-2 text-outline">14:02:08.102</td>
+<td class="py-2 text-primary">Codex App Server</td>
+<td class="py-2 text-tertiary-dim">REQ</td>
+<td class="py-2 text-on-surface truncate max-w-xs">GET /api/v1/health</td>
+<td class="py-2 text-right"><span class="inline-flex items-center gap-1 text-[10px]"><div class="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>200 OK</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Right Column: Inspector & Temporal -->
+<div class="w-80 shrink-0 flex flex-col bg-surface-container-high overflow-y-auto">
+<!-- Observability Health -->
+<div class="p-4 machined-border-b">
+<div class="flex items-center justify-between mb-3">
+<h3 class="text-[10px] font-mono uppercase tracking-widest text-on-surface-variant">Observability Health</h3>
+<span class="material-symbols-outlined text-[14px] text-emerald-400">check_circle</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="text-2xl font-bold font-headline tracking-[-0.05em] text-on-surface">100%</span>
+<span class="text-[10px] font-mono text-emerald-400 uppercase">System Nominal</span>
+</div>
+</div>
+<!-- Temporal Timeline -->
+<div class="p-4 machined-border-b flex-1">
+<h3 class="text-[10px] font-mono uppercase tracking-widest text-on-surface-variant mb-4">Temporal Timeline</h3>
+<div class="space-y-4">
+<div class="flex gap-3">
+<div class="flex flex-col items-center">
+<div class="w-2 h-2 rounded-full bg-primary mt-1"></div>
+<div class="w-px h-full bg-outline-variant/30 mt-1"></div>
+</div>
+<div class="pb-2">
+<div class="text-[10px] font-mono text-outline">14:02:11.004</div>
+<div class="text-[12px] font-mono text-on-surface mt-0.5">Aggregate Request</div>
+<div class="text-[10px] font-mono text-on-surface-variant mt-1">Span ID: 9a3f2b1c</div>
+</div>
+</div>
+<div class="flex gap-3">
+<div class="flex flex-col items-center">
+<div class="w-2 h-2 rounded-full bg-error mt-1"></div>
+<div class="w-px h-full bg-outline-variant/30 mt-1"></div>
+</div>
+<div class="pb-2">
+<div class="text-[10px] font-mono text-outline">14:02:10.892</div>
+<div class="text-[12px] font-mono text-error-dim mt-0.5">DB Connection Timeout</div>
+<div class="text-[10px] font-mono text-on-surface-variant mt-1">Span ID: 8b2e1a0d</div>
+</div>
+</div>
+<div class="flex gap-3">
+<div class="flex flex-col items-center">
+<div class="w-2 h-2 rounded-full bg-primary mt-1"></div>
+</div>
+<div>
+<div class="text-[10px] font-mono text-outline">14:02:10.110</div>
+<div class="text-[12px] font-mono text-on-surface mt-0.5">Ingest Payload</div>
+<div class="text-[10px] font-mono text-on-surface-variant mt-1">Span ID: 7c1d09fc</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Inspector -->
+<div class="p-4 bg-surface-container-low flex-1">
+<div class="flex items-center justify-between mb-3">
+<h3 class="text-[10px] font-mono uppercase tracking-widest text-on-surface-variant">Inspector</h3>
+<button class="text-[10px] font-mono text-primary uppercase hover:underline">Expand</button>
+</div>
+<div class="bg-surface-container-lowest p-3 rounded-sm outline outline-1 outline-outline-variant/30 well-shadow font-mono text-[10px] text-on-surface overflow-x-auto">
+<pre><code>{
+  "trace_id": "01H9A3F2B1C",
+  "span_id": "7c1d09fc",
+  "parent_id": "6b0c88eb",
+  "name": "POST /api/v1/ingest",
+  "kind": "SERVER",
+  "timestamp": 1693576930110,
+  "duration_ms": 42.5,
+  "attributes": {
+    "http.method": "POST",
+    "http.status_code": 202,
+    "net.peer.ip": "10.0.1.45"
+  }
+}</code></pre>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

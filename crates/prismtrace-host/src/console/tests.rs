@@ -1,18 +1,16 @@
+use super::model::filter_request_summaries;
 use super::{
     ConsoleActivityItem, ConsoleActivitySource, ConsoleKnownErrorActivity,
     ConsoleRecentRequestActivity, ConsoleRequestSummary, ConsoleSnapshot,
     ConsoleTargetFilterConfig, ConsoleTargetSummary, collect_activity_items,
-    collect_activity_items_filtered, collect_target_summaries, filter_request_summaries,
-    load_request_detail, load_request_summaries, load_session_detail, load_session_summaries,
+    collect_activity_items_filtered, collect_target_summaries, load_request_detail,
+    load_request_summaries, load_session_detail, load_session_summaries,
     read_request_path_from_reader, render_activity_payload_from_items, run_console_server,
     start_console_server_on_bind_addr, write_console_response,
 };
 use crate::bootstrap;
 use crate::discovery::StaticProcessSampleSource;
-use prismtrace_core::{
-    AttachSession, AttachSessionState, ProbeHealth, ProbeState, ProcessSample, ProcessTarget,
-    RuntimeKind,
-};
+use prismtrace_core::{ProcessSample, ProcessTarget, RuntimeKind};
 use std::fs;
 use std::io::{self, Cursor, Read};
 use std::net::{TcpListener, TcpStream};
@@ -81,9 +79,7 @@ fn console_target_filter_config_rejects_non_matching_targets() {
     let target = ProcessTarget {
         pid: 8,
         app_name: "Claude Code".into(),
-        executable_path: PathBuf::from(
-            "/Applications/Claude Code.app/Contents/MacOS/Claude Code",
-        ),
+        executable_path: PathBuf::from("/Applications/Claude Code.app/Contents/MacOS/Claude Code"),
         command_line: Some("/Applications/Claude Code.app/Contents/MacOS/Claude Code".into()),
         runtime_kind: RuntimeKind::Electron,
     };
@@ -109,7 +105,7 @@ fn collect_target_summaries_filters_non_matching_targets() -> io::Result<()> {
     ]);
     let filter = ConsoleTargetFilterConfig::new(vec!["opencode".into()]);
 
-    let summaries = collect_target_summaries(&source, Some(&filter), None, None)?;
+    let summaries = collect_target_summaries(&source, Some(&filter))?;
 
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0].pid, 100);
@@ -119,13 +115,6 @@ fn collect_target_summaries_filters_non_matching_targets() -> io::Result<()> {
 #[test]
 fn collect_activity_items_filters_items_by_matching_pid() {
     let filter = ConsoleTargetFilterConfig::new(vec!["opencode".into()]);
-    let matched_target = ProcessTarget {
-        pid: 100,
-        app_name: "opencode".into(),
-        executable_path: PathBuf::from("/usr/local/bin/node"),
-        command_line: Some("node /tmp/opencode.js".into()),
-        runtime_kind: RuntimeKind::Node,
-    };
     let unmatched_target = ProcessTarget {
         pid: 200,
         app_name: "claude".into(),
@@ -133,20 +122,9 @@ fn collect_activity_items_filters_items_by_matching_pid() {
         command_line: Some("node /tmp/claude.js".into()),
         runtime_kind: RuntimeKind::Node,
     };
-    let attach_session = AttachSession {
-        target: matched_target,
-        state: AttachSessionState::Attached,
-        detail: "probe handshake completed".into(),
-        bootstrap: None,
-        failure: None,
-    };
 
     let items = collect_activity_items_filtered(
         ConsoleActivitySource {
-            attach_session: Some(&attach_session),
-            attach_occurred_at_ms: Some(10),
-            probe_health: None,
-            probe_occurred_at_ms: None,
             recent_requests: &[
                 ConsoleRecentRequestActivity {
                     request_id: "req-match".into(),
@@ -184,7 +162,7 @@ fn collect_activity_items_filters_items_by_matching_pid() {
         &[unmatched_target],
     );
 
-    assert_eq!(items.len(), 3);
+    assert_eq!(items.len(), 2);
     assert!(items.iter().all(|item| item.related_pid != Some(200)));
 }
 
@@ -223,8 +201,8 @@ fn render_health_payload_filters_errors_by_matching_pid() {
         pid: 100,
         display_name: "opencode".into(),
         runtime_kind: "node".into(),
-        attach_state: "attached".into(),
-        probe_state_summary: "probe: healthy".into(),
+        source_state: "discoverable".into(),
+        source_summary: "local process target · node runtime".into(),
     }];
     let activity = vec![
         ConsoleActivityItem {
@@ -337,7 +315,7 @@ fn render_targets_payload_uses_filtered_no_match_empty_state_when_context_is_act
     );
 
     assert!(
-        payload.contains("当前过滤条件下没有匹配目标"),
+        payload.contains("当前过滤条件下没有匹配 source"),
         "payload: {payload}"
     );
 }
@@ -375,7 +353,7 @@ fn render_requests_payload_uses_filtered_no_match_empty_state_when_context_is_ac
 }
 
 #[test]
-fn render_console_homepage_uses_filtered_no_match_empty_states_when_context_is_active() {
+fn render_console_homepage_exposes_filter_banner_and_data_regions_when_context_is_active() {
     let homepage = super::render_console_homepage(&ConsoleSnapshot {
         summary: "PrismTrace host skeleton".into(),
         bind_addr: "http://127.0.0.1:7799".into(),
@@ -392,15 +370,19 @@ fn render_console_homepage_uses_filtered_no_match_empty_states_when_context_is_a
     });
 
     assert!(
-        homepage.contains("当前过滤条件下没有匹配目标"),
+        homepage.contains("Filtered monitor scope"),
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("当前过滤条件下没有匹配活动"),
+        homepage.contains("id=\"filter-context-region\""),
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("当前过滤条件下没有匹配请求"),
+        homepage.contains("id=\"targets-region\""),
+        "homepage: {homepage}"
+    );
+    assert!(
+        homepage.contains("id=\"requests-region\""),
         "homepage: {homepage}"
     );
 }
@@ -451,10 +433,10 @@ fn console_server_serves_homepage_over_http() -> io::Result<()> {
         .nth(1)
         .expect("response should include body");
 
-    assert!(body.contains("PrismTrace macOS Console"), "body: {body}");
-    assert!(body.contains("Targets"), "body: {body}");
+    assert!(body.contains("PrismTrace Observer Console"), "body: {body}");
+    assert!(body.contains("Sources"), "body: {body}");
     assert!(body.contains("Activity"), "body: {body}");
-    assert!(body.contains("Requests"), "body: {body}");
+    assert!(body.contains("Unified Telemetry Feed"), "body: {body}");
 
     handle.join().expect("server thread should join")?;
     fs::remove_dir_all(result.config.state_root)?;
@@ -476,11 +458,11 @@ fn render_console_homepage_includes_title_and_heading() {
     });
 
     assert!(
-        homepage.contains("<title>PrismTrace macOS Console</title>"),
+        homepage.contains("<title>PrismTrace Observer Console Overview</title>"),
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("<h1>PrismTrace macOS Console</h1>"),
+        homepage.contains("PrismTrace Observer Console"),
         "homepage: {homepage}"
     );
 }
@@ -508,7 +490,7 @@ fn render_console_homepage_exposes_theme_switcher() {
 }
 
 #[test]
-fn render_console_homepage_renders_session_timeline_content() {
+fn render_console_homepage_seeds_initial_session_selection_for_js_hydration() {
     let homepage = super::render_console_homepage(&ConsoleSnapshot {
         summary: "PrismTrace host skeleton".into(),
         bind_addr: "http://127.0.0.1:7799".into(),
@@ -555,22 +537,18 @@ fn render_console_homepage_renders_session_timeline_content() {
     });
 
     assert!(
-        homepage.contains("Session Timeline"),
+        homepage.contains("data-initial-session-id=\"session-1\""),
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("openai POST /v1/responses"),
+        homepage.contains("id=\"session-detail-region\""),
         "homepage: {homepage}"
     );
-    assert!(
-        homepage.contains("provider: openai"),
-        "homepage: {homepage}"
-    );
-    assert!(homepage.contains("tools: 3"), "homepage: {homepage}");
+    assert!(homepage.contains("Sessions"), "homepage: {homepage}");
 }
 
 #[test]
-fn render_console_homepage_renders_request_summary_content() {
+fn render_console_homepage_seeds_initial_request_selection_for_js_hydration() {
     let homepage = super::render_console_homepage(&ConsoleSnapshot {
         summary: "PrismTrace host skeleton".into(),
         bind_addr: "http://127.0.0.1:7799".into(),
@@ -591,19 +569,21 @@ fn render_console_homepage_renders_request_summary_content() {
     });
 
     assert!(
-        homepage.contains("openai POST /v1/responses"),
+        homepage.contains("data-initial-request-id=\"req-1\""),
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("provider: openai"),
+        homepage.contains("id=\"requests-region\""),
         "homepage: {homepage}"
     );
-    assert!(homepage.contains("model: gpt-4.1"), "homepage: {homepage}");
-    assert!(homepage.contains("view detail"), "homepage: {homepage}");
+    assert!(
+        homepage.contains("/assets/console.js"),
+        "homepage: {homepage}"
+    );
 }
 
 #[test]
-fn render_console_homepage_renders_snapshot_lists_and_refresh_script() {
+fn render_console_homepage_renders_empty_regions_and_refresh_script() {
     let homepage = super::render_console_homepage(&ConsoleSnapshot {
         summary: "PrismTrace host skeleton".into(),
         bind_addr: "http://127.0.0.1:7799".into(),
@@ -612,15 +592,15 @@ fn render_console_homepage_renders_snapshot_lists_and_refresh_script() {
             pid: 701,
             display_name: "Codex".into(),
             runtime_kind: "node".into(),
-            attach_state: "attached".into(),
-            probe_state_summary: "probe: healthy".into(),
+            source_state: "discoverable".into(),
+            source_summary: "local process target · node runtime".into(),
         }],
         activity_items: vec![super::ConsoleActivityItem {
-            activity_id: "probe-1".into(),
-            activity_type: "probe".into(),
+            activity_id: "source-1".into(),
+            activity_type: "source".into(),
             occurred_at_ms: 20,
-            title: "Probe online".into(),
-            subtitle: "installed=1 failed=0".into(),
+            title: "Source discovered".into(),
+            subtitle: "Codex runtime visible to PrismTrace".into(),
             related_pid: Some(701),
             related_request_id: None,
         }],
@@ -637,22 +617,71 @@ fn render_console_homepage_renders_snapshot_lists_and_refresh_script() {
         session_details: vec![],
     });
 
-    assert!(homepage.contains("Codex"), "homepage: {homepage}");
-    assert!(homepage.contains("Probe online"), "homepage: {homepage}");
     assert!(
-        homepage.contains("openai POST /v1/responses"),
+        homepage.contains("id=\"targets-region\""),
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("refreshRegion(\"/api/targets\""),
+        homepage.contains("id=\"activity-region\""),
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("refreshRegion(\"/api/activity\""),
+        homepage.contains("id=\"requests-region\""),
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("refreshRegion(\"/api/requests\""),
+        homepage.contains("/assets/console.js"),
+        "homepage: {homepage}"
+    );
+    assert!(
+        homepage.contains("data-initial-request-id=\"req-1\""),
+        "homepage: {homepage}"
+    );
+}
+
+#[test]
+fn render_console_homepage_uses_observer_first_shell_copy() {
+    let homepage = super::render_console_homepage(&ConsoleSnapshot {
+        summary: "PrismTrace host skeleton".into(),
+        bind_addr: "http://127.0.0.1:7799".into(),
+        filter_context: None,
+        target_summaries: vec![super::ConsoleTargetSummary {
+            pid: 0,
+            display_name: "Codex App Server".into(),
+            runtime_kind: "observer".into(),
+            source_state: "active".into(),
+            source_summary:
+                "official observer · channel: codex-app-server · sessions: 2 · events: 9 · last seen: 1714000005100"
+                    .into(),
+        }],
+        activity_items: vec![],
+        request_summaries: vec![],
+        session_summaries: vec![super::ConsoleSessionSummary {
+            session_id: "observer:codex:1714000005000-77".into(),
+            pid: 0,
+            target_display_name: "Codex App Server".into(),
+            started_at_ms: 1714000005000,
+            completed_at_ms: 1714000005100,
+            exchange_count: 9,
+            request_count: 9,
+            response_count: 2,
+        }],
+        request_details: vec![],
+        session_details: vec![],
+    });
+
+    assert!(
+        homepage.contains("PrismTrace Observer Console"),
+        "homepage: {homepage}"
+    );
+    assert!(homepage.contains("Sources"), "homepage: {homepage}");
+    assert!(homepage.contains("Sessions"), "homepage: {homepage}");
+    assert!(
+        homepage.contains("Unified Telemetry Feed"),
+        "homepage: {homepage}"
+    );
+    assert!(
+        homepage.contains("data-initial-session-id=\"observer:codex:1714000005000-77\""),
         "homepage: {homepage}"
     );
 }
@@ -663,7 +692,7 @@ fn render_targets_payload_includes_empty_state_when_no_targets() {
 
     assert!(payload.contains("\"targets\":[]"), "payload: {payload}");
     assert!(
-        payload.contains("\"empty_state\":\"尚无可观测目标\""),
+        payload.contains("\"empty_state\":\"尚无可观测 source\""),
         "payload: {payload}"
     );
 }
@@ -735,14 +764,9 @@ fn render_console_homepage_renders_request_detail_and_health_panel_regions() {
         session_details: vec![],
     });
 
-    assert!(homepage.contains("Request Detail"), "homepage: {homepage}");
+    assert!(homepage.contains("INSPECTOR_LOG"), "homepage: {homepage}");
     assert!(
         homepage.contains("id=\"request-detail-region\""),
-        "homepage: {homepage}"
-    );
-    assert!(homepage.contains("Tool Visibility"), "homepage: {homepage}");
-    assert!(
-        homepage.contains("Observability Health"),
         "homepage: {homepage}"
     );
     assert!(
@@ -750,30 +774,31 @@ fn render_console_homepage_renders_request_detail_and_health_panel_regions() {
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("refreshRequestDetail(\"req-1\""),
+        homepage.contains("data-initial-request-id=\"req-1\""),
         "homepage: {homepage}"
     );
 }
 
 #[test]
-fn render_console_homepage_renders_probe_and_error_summary_content() {
+fn render_console_homepage_renders_health_shell_region() {
     let homepage = super::render_console_homepage(&ConsoleSnapshot {
-        summary: "PrismTrace host skeleton\n[alive] probe: attached (installed: 2, failed: 1)\nprobe heartbeat timed out".into(),
+        summary: "PrismTrace host skeleton\nCodex observer active\nsource heartbeat timed out"
+            .into(),
         bind_addr: "http://127.0.0.1:7799".into(),
         filter_context: None,
         target_summaries: vec![super::ConsoleTargetSummary {
             pid: 701,
             display_name: "Codex".into(),
             runtime_kind: "node".into(),
-            attach_state: "attached".into(),
-            probe_state_summary: "[alive] probe: attached (installed: 2, failed: 1)".into(),
+            source_state: "discoverable".into(),
+            source_summary: "local process target · node runtime".into(),
         }],
         activity_items: vec![super::ConsoleActivityItem {
             activity_id: "error-1".into(),
             activity_type: "error".into(),
             occurred_at_ms: 40,
-            title: "Probe timeout".into(),
-            subtitle: "probe heartbeat timed out".into(),
+            title: "Source timeout".into(),
+            subtitle: "source heartbeat timed out".into(),
             related_pid: Some(701),
             related_request_id: None,
         }],
@@ -783,10 +808,12 @@ fn render_console_homepage_renders_probe_and_error_summary_content() {
         session_details: vec![],
     });
 
-    assert!(homepage.contains("probe: attached"), "homepage: {homepage}");
-    assert!(homepage.contains("Probe timeout"), "homepage: {homepage}");
     assert!(
-        homepage.contains("probe heartbeat timed out"),
+        homepage.contains("id=\"health-region\""),
+        "homepage: {homepage}"
+    );
+    assert!(
+        homepage.contains("/assets/console.js"),
         "homepage: {homepage}"
     );
 }
@@ -806,21 +833,21 @@ fn render_request_detail_payload_marks_missing_detail_with_status() {
 }
 
 #[test]
-fn render_health_payload_includes_probe_summary_and_errors() {
+fn render_health_payload_includes_source_summary_and_errors() {
     let payload = super::render_health_payload(
         &[super::ConsoleTargetSummary {
             pid: 701,
             display_name: "Codex".into(),
             runtime_kind: "node".into(),
-            attach_state: "attached".into(),
-            probe_state_summary: "[alive] probe: attached (installed: 2, failed: 1)".into(),
+            source_state: "discoverable".into(),
+            source_summary: "local process target · node runtime".into(),
         }],
         &[super::ConsoleActivityItem {
             activity_id: "error-1".into(),
             activity_type: "error".into(),
             occurred_at_ms: 40,
-            title: "Probe timeout".into(),
-            subtitle: "probe heartbeat timed out".into(),
+            title: "Source timeout".into(),
+            subtitle: "source heartbeat timed out".into(),
             related_pid: Some(701),
             related_request_id: None,
         }],
@@ -829,15 +856,13 @@ fn render_health_payload_includes_probe_summary_and_errors() {
     );
 
     assert!(
-        payload.contains(
-            "\"probe_summary\":\"[alive] probe: attached (installed: 2, failed: 1)\""
-        ),
+        payload.contains("\"source_summary\":\"local process target · node runtime\""),
         "payload: {payload}"
     );
     assert!(payload.contains("\"errors\":"), "payload: {payload}");
-    assert!(payload.contains("Probe timeout"), "payload: {payload}");
+    assert!(payload.contains("Source timeout"), "payload: {payload}");
     assert!(
-        payload.contains("probe heartbeat timed out"),
+        payload.contains("source heartbeat timed out"),
         "payload: {payload}"
     );
 }
@@ -852,15 +877,15 @@ fn console_server_returns_health_api_payload() -> io::Result<()> {
             pid: 777,
             display_name: "node".into(),
             runtime_kind: "node".into(),
-            attach_state: "attached".into(),
-            probe_state_summary: "[alive] probe: attached (installed: 2, failed: 1)".into(),
+            source_state: "discoverable".into(),
+            source_summary: "local process target · node runtime".into(),
         }],
         activity_items: vec![super::ConsoleActivityItem {
             activity_id: "error-1".into(),
             activity_type: "error".into(),
             occurred_at_ms: 50,
-            title: "Probe timeout".into(),
-            subtitle: "probe heartbeat timed out".into(),
+            title: "Source timeout".into(),
+            subtitle: "source heartbeat timed out".into(),
             related_pid: Some(777),
             related_request_id: None,
         }],
@@ -888,10 +913,10 @@ fn console_server_returns_health_api_payload() -> io::Result<()> {
         "response: {response}"
     );
     assert!(
-        response.contains("\"probe_summary\""),
+        response.contains("\"source_summary\""),
         "response: {response}"
     );
-    assert!(response.contains("Probe timeout"), "response: {response}");
+    assert!(response.contains("Source timeout"), "response: {response}");
 
     handle.join().expect("server thread should join")?;
     Ok(())
@@ -999,7 +1024,7 @@ fn console_server_returns_filtered_targets_api_empty_state_and_context() -> io::
         "response: {response}"
     );
     assert!(
-        response.contains("当前过滤条件下没有匹配目标"),
+        response.contains("当前过滤条件下没有匹配 source"),
         "response: {response}"
     );
 
@@ -1008,8 +1033,8 @@ fn console_server_returns_filtered_targets_api_empty_state_and_context() -> io::
 }
 
 #[test]
-fn write_console_response_renders_target_summary_fields_from_controlled_snapshot()
--> io::Result<()> {
+fn write_console_response_renders_target_summary_fields_from_controlled_snapshot() -> io::Result<()>
+{
     let snapshot = ConsoleSnapshot {
         summary: "summary".into(),
         bind_addr: "http://127.0.0.1:7799".into(),
@@ -1018,8 +1043,8 @@ fn write_console_response_renders_target_summary_fields_from_controlled_snapshot
             pid: 777,
             display_name: "node".into(),
             runtime_kind: "node".into(),
-            attach_state: "attached".into(),
-            probe_state_summary: "[alive] probe: attached (installed: 2, failed: 1)".into(),
+            source_state: "discoverable".into(),
+            source_summary: "local process target · node runtime".into(),
         }],
         activity_items: vec![],
         request_summaries: vec![],
@@ -1042,11 +1067,11 @@ fn write_console_response_renders_target_summary_fields_from_controlled_snapshot
         "response: {response}"
     );
     assert!(
-        response.contains("\"attach_state\":\"attached\""),
+        response.contains("\"source_state\":\"discoverable\""),
         "response: {response}"
     );
     assert!(
-        response.contains("\"probe_state_summary\""),
+        response.contains("\"source_summary\""),
         "response: {response}"
     );
 
@@ -1055,7 +1080,7 @@ fn write_console_response_renders_target_summary_fields_from_controlled_snapshot
 }
 
 #[test]
-fn collect_target_summaries_marks_active_target_with_probe_health() -> io::Result<()> {
+fn collect_target_summaries_marks_local_targets_as_discoverable() -> io::Result<()> {
     let source = StaticProcessSampleSource::new(vec![
         ProcessSample {
             pid: 701,
@@ -1070,76 +1095,45 @@ fn collect_target_summaries_marks_active_target_with_probe_health() -> io::Resul
             command_line: None,
         },
     ]);
-    let active_session = AttachSession {
-        target: ProcessTarget {
-            pid: 701,
-            app_name: "node".into(),
-            executable_path: PathBuf::from("/usr/local/bin/node"),
-            command_line: None,
-            runtime_kind: RuntimeKind::Node,
-        },
-        state: AttachSessionState::Attached,
-        detail: "probe handshake completed".into(),
-        bootstrap: None,
-        failure: None,
-    };
-    let probe_health = ProbeHealth {
-        state: ProbeState::Attached,
-        installed_hooks: vec!["fetch".into(), "http".into()],
-        failed_hooks: vec!["undici".into()],
-    };
-
-    let summaries =
-        collect_target_summaries(&source, None, Some(&active_session), Some(&probe_health))?;
+    let summaries = collect_target_summaries(&source, None)?;
 
     assert_eq!(summaries.len(), 2);
     assert_eq!(summaries[0].pid, 701);
-    assert_eq!(summaries[0].attach_state, "attached");
-    assert!(summaries[0].probe_state_summary.contains("installed: 2"));
-    assert!(summaries[0].probe_state_summary.contains("failed: 1"));
-    assert_eq!(summaries[1].attach_state, "idle");
-    assert_eq!(summaries[1].probe_state_summary, "probe: no active session");
+    assert_eq!(summaries[0].source_state, "discoverable");
+    assert_eq!(
+        summaries[0].source_summary,
+        "local process target · node runtime"
+    );
+    assert_eq!(summaries[1].source_state, "discoverable");
+    assert_eq!(
+        summaries[1].source_summary,
+        "local process target · electron runtime"
+    );
     Ok(())
 }
 
 #[test]
-fn collect_target_summaries_uses_no_health_data_for_active_target_without_probe_snapshot()
--> io::Result<()> {
+fn collect_target_summaries_uses_runtime_summary_for_single_target() -> io::Result<()> {
     let source = StaticProcessSampleSource::new(vec![ProcessSample {
         pid: 703,
         process_name: "node".into(),
         executable_path: PathBuf::from("/usr/local/bin/node"),
         command_line: None,
     }]);
-    let active_session = AttachSession {
-        target: ProcessTarget {
-            pid: 703,
-            app_name: "node".into(),
-            executable_path: PathBuf::from("/usr/local/bin/node"),
-            command_line: None,
-            runtime_kind: RuntimeKind::Node,
-        },
-        state: AttachSessionState::Attached,
-        detail: "probe handshake completed".into(),
-        bootstrap: None,
-        failure: None,
-    };
-
-    let summaries = collect_target_summaries(&source, None, Some(&active_session), None)?;
+    let summaries = collect_target_summaries(&source, None)?;
 
     assert_eq!(summaries.len(), 1);
-    assert_eq!(summaries[0].attach_state, "attached");
-    assert_eq!(summaries[0].probe_state_summary, "probe: no health data");
+    assert_eq!(summaries[0].source_state, "discoverable");
+    assert_eq!(
+        summaries[0].source_summary,
+        "local process target · node runtime"
+    );
     Ok(())
 }
 
 #[test]
 fn collect_activity_items_returns_empty_for_no_known_activity() {
     let items = collect_activity_items(super::ConsoleActivitySource {
-        attach_session: None,
-        attach_occurred_at_ms: None,
-        probe_health: None,
-        probe_occurred_at_ms: None,
         recent_requests: &[],
         known_errors: &[],
     });
@@ -1152,25 +1146,7 @@ fn collect_activity_items_returns_empty_for_no_known_activity() {
 }
 
 #[test]
-fn collect_activity_items_orders_attach_probe_request_and_error_by_time() {
-    let active_session = AttachSession {
-        target: ProcessTarget {
-            pid: 801,
-            app_name: "node".into(),
-            executable_path: PathBuf::from("/usr/local/bin/node"),
-            command_line: None,
-            runtime_kind: RuntimeKind::Node,
-        },
-        state: AttachSessionState::Attached,
-        detail: "probe handshake completed".into(),
-        bootstrap: None,
-        failure: None,
-    };
-    let probe_health = ProbeHealth {
-        state: ProbeState::Attached,
-        installed_hooks: vec!["fetch".into()],
-        failed_hooks: vec![],
-    };
+fn collect_activity_items_orders_request_and_error_by_time() {
     let recent_requests = vec![ConsoleRecentRequestActivity {
         request_id: "req-1".into(),
         captured_at_ms: 40,
@@ -1187,19 +1163,13 @@ fn collect_activity_items_orders_attach_probe_request_and_error_by_time() {
     }];
 
     let items = collect_activity_items(super::ConsoleActivitySource {
-        attach_session: Some(&active_session),
-        attach_occurred_at_ms: Some(10),
-        probe_health: Some(&probe_health),
-        probe_occurred_at_ms: Some(20),
         recent_requests: &recent_requests,
         known_errors: &known_errors,
     });
 
-    assert_eq!(items.len(), 4);
+    assert_eq!(items.len(), 2);
     assert_eq!(items[0].activity_type, "error");
     assert_eq!(items[1].activity_type, "request");
-    assert_eq!(items[2].activity_type, "probe");
-    assert_eq!(items[3].activity_type, "attach");
 }
 
 #[test]
@@ -1535,8 +1505,8 @@ fn load_session_detail_splits_same_pid_after_time_window() -> io::Result<()> {
 }
 
 #[test]
-fn load_session_summaries_do_not_merge_when_only_response_finishes_within_window()
--> io::Result<()> {
+fn load_session_summaries_do_not_merge_when_only_response_finishes_within_window() -> io::Result<()>
+{
     let workspace_root = unique_test_dir();
     let result = bootstrap(&workspace_root)?;
     let requests_dir = result.storage.artifacts_dir.join("requests");
@@ -1688,8 +1658,8 @@ fn load_request_detail_returns_base_detail_for_existing_request() -> io::Result<
         .to_string(),
     )?;
 
-    let detail = load_request_detail(&result.storage, "77-1714000005000-1")?
-        .expect("detail should exist");
+    let detail =
+        load_request_detail(&result.storage, "77-1714000005000-1")?.expect("detail should exist");
 
     assert_eq!(detail.request_id, "77-1714000005000-1");
     assert_eq!(detail.exchange_id.as_deref(), Some("ex-77"));
@@ -2248,6 +2218,155 @@ fn console_server_filtered_request_detail_does_not_leak_unmatched_request() -> i
 }
 
 #[test]
+fn console_server_returns_observer_requests_api_payload() -> io::Result<()> {
+    let workspace_root = unique_test_dir();
+    let result = bootstrap(&workspace_root)?;
+    let observer_dir = result
+        .storage
+        .artifacts_dir
+        .join("observer_events")
+        .join("codex");
+    fs::create_dir_all(&observer_dir)?;
+    fs::write(
+        observer_dir.join("1714000005000-77.jsonl"),
+        concat!(
+            "{\"record_type\":\"handshake\",\"channel\":\"codex-app-server\",\"transport\":\"ipc\",\"server_label\":\"Codex App Server\",\"recorded_at_ms\":1714000005000,\"raw_json\":{}}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"tool\",\"summary\":\"Ran shell command\",\"method\":\"shell.exec\",\"thread_id\":\"thread-1\",\"turn_id\":\"turn-1\",\"item_id\":\"item-1\",\"timestamp\":\"2026-04-26T10:00:00Z\",\"recorded_at_ms\":1714000005100,\"raw_json\":{\"tool\":\"exec_command\"}}\n"
+        ),
+    )?;
+
+    let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+    let addr = server
+        .local_url()?
+        .trim_start_matches("http://")
+        .to_string();
+    let handle = thread::spawn(move || server.serve_once());
+
+    let response = send_get_request(&addr, "/api/requests")?;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"request_id\":\"observer:codex:1714000005000-77:1\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"provider\":\"codex-app-server\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"model\":\"tool\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("Ran shell command"),
+        "response: {response}"
+    );
+
+    handle.join().expect("server thread should join")?;
+    fs::remove_dir_all(result.config.state_root)?;
+    Ok(())
+}
+
+#[test]
+fn console_server_returns_observer_request_detail_api_payload() -> io::Result<()> {
+    let workspace_root = unique_test_dir();
+    let result = bootstrap(&workspace_root)?;
+    let observer_dir = result
+        .storage
+        .artifacts_dir
+        .join("observer_events")
+        .join("codex");
+    fs::create_dir_all(&observer_dir)?;
+    fs::write(
+        observer_dir.join("1714000005000-77.jsonl"),
+        concat!(
+            "{\"record_type\":\"handshake\",\"channel\":\"codex-app-server\",\"transport\":\"ipc\",\"server_label\":\"Codex App Server\",\"recorded_at_ms\":1714000005000,\"raw_json\":{}}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"tool\",\"summary\":\"Ran shell command\",\"method\":\"shell.exec\",\"thread_id\":\"thread-1\",\"turn_id\":\"turn-1\",\"item_id\":\"item-1\",\"timestamp\":\"2026-04-26T10:00:00Z\",\"recorded_at_ms\":1714000005100,\"raw_json\":{\"tool\":\"exec_command\",\"args\":\"cargo test\"}}\n"
+        ),
+    )?;
+
+    let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+    let addr = server
+        .local_url()?
+        .trim_start_matches("http://")
+        .to_string();
+    let handle = thread::spawn(move || server.serve_once());
+
+    let response = send_get_request(&addr, "/api/requests/observer:codex:1714000005000-77:1")?;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"detail_kind\":\"observer_event\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"provider\":\"codex-app-server\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"thread_id\":\"thread-1\""),
+        "response: {response}"
+    );
+    assert!(response.contains("exec_command"), "response: {response}");
+
+    handle.join().expect("server thread should join")?;
+    fs::remove_dir_all(result.config.state_root)?;
+    Ok(())
+}
+
+#[test]
+fn console_server_returns_observer_session_detail_api_payload() -> io::Result<()> {
+    let workspace_root = unique_test_dir();
+    let result = bootstrap(&workspace_root)?;
+    let observer_dir = result
+        .storage
+        .artifacts_dir
+        .join("observer_events")
+        .join("codex");
+    fs::create_dir_all(&observer_dir)?;
+    fs::write(
+        observer_dir.join("1714000005000-77.jsonl"),
+        concat!(
+            "{\"record_type\":\"handshake\",\"channel\":\"codex-app-server\",\"transport\":\"ipc\",\"server_label\":\"Codex App Server\",\"recorded_at_ms\":1714000005000,\"raw_json\":{}}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"thread\",\"summary\":\"Thread started\",\"method\":\"thread.start\",\"thread_id\":\"thread-1\",\"turn_id\":null,\"item_id\":null,\"timestamp\":\"2026-04-26T10:00:00Z\",\"recorded_at_ms\":1714000005100,\"raw_json\":{\"thread\":\"thread-1\"}}\n"
+        ),
+    )?;
+
+    let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+    let addr = server
+        .local_url()?
+        .trim_start_matches("http://")
+        .to_string();
+    let handle = thread::spawn(move || server.serve_once());
+
+    let response = send_get_request(&addr, "/api/sessions/observer:codex:1714000005000-77")?;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"detail_kind\":\"observer_session\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"target_display_name\":\"Codex App Server\""),
+        "response: {response}"
+    );
+    assert!(response.contains("Thread started"), "response: {response}");
+
+    handle.join().expect("server thread should join")?;
+    fs::remove_dir_all(result.config.state_root)?;
+    Ok(())
+}
+
+#[test]
 fn malformed_request_returns_bad_request() -> io::Result<()> {
     let snapshot = ConsoleSnapshot {
         summary: "summary".into(),
@@ -2297,8 +2416,7 @@ fn send_get_request(addr: &str, path: &str) -> io::Result<String> {
     let mut stream = TcpStream::connect(addr)?;
     std::io::Write::write_all(
         &mut stream,
-        format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-            .as_bytes(),
+        format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").as_bytes(),
     )?;
     let mut response = String::new();
     stream.read_to_string(&mut response)?;
