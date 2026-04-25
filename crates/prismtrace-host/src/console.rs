@@ -4,7 +4,7 @@ use crate::probe_health::ProbeHealthStore;
 use prismtrace_core::{AttachSession, ProbeHealth, ProcessTarget};
 use prismtrace_storage::StorageLayout;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
 use std::io::{Read, Write};
@@ -440,13 +440,14 @@ pub fn collect_console_snapshot(
     result: &BootstrapResult,
     filter: Option<&ConsoleTargetFilterConfig>,
 ) -> ConsoleSnapshot {
-    collect_console_snapshot_for_bind_addr(result, &result.config.bind_addr, filter)
+    collect_console_snapshot_for_bind_addr(result, &result.config.bind_addr, filter, false)
 }
 
 fn collect_console_snapshot_for_bind_addr(
     result: &BootstrapResult,
     bind_addr: &str,
     filter: Option<&ConsoleTargetFilterConfig>,
+    include_sessions: bool,
 ) -> ConsoleSnapshot {
     let (_, unmatched_targets, target_summaries) =
         collect_target_partition_and_summaries(&PsProcessSampleSource, filter, None, None)
@@ -455,10 +456,14 @@ fn collect_console_snapshot_for_bind_addr(
         &load_request_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
         filter,
     );
-    let session_summaries = filter_session_summaries(
-        &load_session_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
-        filter,
-    );
+    let session_summaries = if include_sessions {
+        filter_session_summaries(
+            &load_session_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
+            filter,
+        )
+    } else {
+        Vec::new()
+    };
     let recent_requests = load_recent_request_activity(&result.storage);
 
     ConsoleSnapshot {
@@ -554,10 +559,7 @@ pub fn start_console_server_on_bind_addr(
                 &load_request_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
                 filter,
             ),
-            session_summaries: filter_session_summaries(
-                &load_session_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
-                filter,
-            ),
+            session_summaries: Vec::new(),
             request_details: Vec::new(),
             session_details: Vec::new(),
         },
@@ -572,6 +574,7 @@ fn write_console_response(stream: &mut TcpStream, snapshot: &ConsoleSnapshot) ->
     write_console_response_with_storage(stream, snapshot, None, None)
 }
 
+#[cfg(test)]
 fn write_console_response_with_storage(
     stream: &mut TcpStream,
     snapshot: &ConsoleSnapshot,
@@ -579,6 +582,16 @@ fn write_console_response_with_storage(
     filter: Option<&ConsoleTargetFilterConfig>,
 ) -> io::Result<()> {
     let request_path = read_request_path(stream)?;
+    write_console_response_for_path(request_path, stream, snapshot, storage, filter)
+}
+
+fn write_console_response_for_path(
+    request_path: Option<String>,
+    stream: &mut TcpStream,
+    snapshot: &ConsoleSnapshot,
+    storage: Option<&StorageLayout>,
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> io::Result<()> {
     let (status_line, content_type, body) = match request_path.as_deref() {
         Some("/") => (
             "HTTP/1.1 200 OK",
@@ -678,8 +691,20 @@ fn write_live_console_response(
     bind_addr: &str,
     filter: Option<&ConsoleTargetFilterConfig>,
 ) -> io::Result<()> {
-    let snapshot = collect_console_snapshot_for_bind_addr(result, bind_addr, filter);
-    write_console_response_with_storage(stream, &snapshot, Some(&result.storage), filter)
+    let request_path = read_request_path(stream)?;
+    let include_sessions = request_path
+        .as_deref()
+        .map(|path| path == "/" || path == "/api/sessions" || path.starts_with("/api/sessions/"))
+        .unwrap_or(false);
+    let snapshot =
+        collect_console_snapshot_for_bind_addr(result, bind_addr, filter, include_sessions);
+    write_console_response_for_path(
+        request_path,
+        stream,
+        &snapshot,
+        Some(&result.storage),
+        filter,
+    )
 }
 
 fn read_request_path(stream: &mut TcpStream) -> io::Result<Option<String>> {
@@ -2259,6 +2284,8 @@ fn load_session_details(storage: &StorageLayout) -> io::Result<Vec<ConsoleSessio
 }
 
 fn load_exchange_records(storage: &StorageLayout) -> io::Result<Vec<ExchangeRecord>> {
+    let response_index = build_response_detail_index(storage)?;
+    let tool_visibility_index = build_tool_visibility_detail_index(storage)?;
     let mut exchanges = load_request_records(storage)?
         .into_iter()
         .filter_map(|record| {
@@ -2272,15 +2299,13 @@ fn load_exchange_records(storage: &StorageLayout) -> io::Result<Vec<ExchangeReco
             let response = record
                 .exchange_id
                 .as_deref()
-                .and_then(|exchange_id| load_matching_response_detail(storage, exchange_id).ok())
-                .flatten();
-            let tool_visibility = load_matching_tool_visibility_detail(
-                storage,
+                .and_then(|exchange_id| response_index.get(exchange_id))
+                .cloned();
+            let tool_visibility = select_tool_visibility_detail(
+                &tool_visibility_index,
                 &record.request_id,
                 record.exchange_id.as_deref(),
-            )
-            .ok()
-            .flatten();
+            );
 
             let completed_at_ms = response
                 .as_ref()
@@ -2537,47 +2562,7 @@ fn load_matching_response_detail(
     storage: &StorageLayout,
     exchange_id: &str,
 ) -> io::Result<Option<ConsoleResponseDetail>> {
-    let responses_dir = storage.artifacts_dir.join("responses");
-    if !responses_dir.exists() {
-        return Ok(None);
-    }
-
-    let mut matched: Option<ResponseArtifactRecord> = None;
-    for entry in fs::read_dir(&responses_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
-        }
-
-        let Some(record) = read_response_record(&path)? else {
-            continue;
-        };
-
-        if record.exchange_id != exchange_id {
-            continue;
-        }
-
-        let should_replace = matched
-            .as_ref()
-            .map(|current| record.completed_at_ms >= current.completed_at_ms)
-            .unwrap_or(true);
-        if should_replace {
-            matched = Some(record);
-        }
-    }
-
-    Ok(matched.map(|record| ConsoleResponseDetail {
-        artifact_path: record.artifact_path.display().to_string(),
-        status_code: record.status_code,
-        headers: record.headers,
-        body_text: record.body_text,
-        body_size_bytes: record.body_size_bytes,
-        truncated: record.truncated,
-        started_at_ms: record.started_at_ms,
-        completed_at_ms: record.completed_at_ms,
-        duration_ms: record.duration_ms,
-    }))
+    Ok(build_response_detail_index(storage)?.get(exchange_id).cloned())
 }
 
 fn load_matching_tool_visibility_detail(
@@ -2585,57 +2570,11 @@ fn load_matching_tool_visibility_detail(
     request_id: &str,
     exchange_id: Option<&str>,
 ) -> io::Result<Option<ConsoleToolVisibilityDetail>> {
-    let visibility_dir = storage.artifacts_dir.join("tool_visibility");
-    if !visibility_dir.exists() {
-        return Ok(None);
-    }
-
-    let mut request_match: Option<ToolVisibilityArtifactRecord> = None;
-    let mut exchange_match: Option<ToolVisibilityArtifactRecord> = None;
-    for entry in fs::read_dir(&visibility_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
-        }
-
-        let Some(record) = read_tool_visibility_record(&path)? else {
-            continue;
-        };
-
-        let request_matches = record.request_id == request_id;
-        let exchange_matches = exchange_id
-            .zip(record.exchange_id.as_deref())
-            .map(|(expected, actual)| expected == actual)
-            .unwrap_or(false);
-        if request_matches {
-            let should_replace = request_match
-                .as_ref()
-                .map(|current| record.captured_at_ms >= current.captured_at_ms)
-                .unwrap_or(true);
-            if should_replace {
-                request_match = Some(record);
-            }
-        } else if exchange_matches {
-            let should_replace = exchange_match
-                .as_ref()
-                .map(|current| record.captured_at_ms >= current.captured_at_ms)
-                .unwrap_or(true);
-            if should_replace {
-                exchange_match = Some(record);
-            }
-        }
-    }
-
-    let matched = request_match.or(exchange_match);
-    Ok(matched.map(|record| ConsoleToolVisibilityDetail {
-        artifact_path: record.artifact_path.display().to_string(),
-        visibility_stage: record.visibility_stage,
-        tool_choice: record.tool_choice,
-        tool_count_final: record.tool_count_final,
-        final_tools: record.final_tools,
-        final_tools_json: record.final_tools_json,
-    }))
+    Ok(select_tool_visibility_detail(
+        &build_tool_visibility_detail_index(storage)?,
+        request_id,
+        exchange_id,
+    ))
 }
 
 fn read_response_record(path: &Path) -> io::Result<Option<ResponseArtifactRecord>> {
@@ -2692,6 +2631,53 @@ fn read_response_record(path: &Path) -> io::Result<Option<ResponseArtifactRecord
     }))
 }
 
+fn build_response_detail_index(
+    storage: &StorageLayout,
+) -> io::Result<HashMap<String, ConsoleResponseDetail>> {
+    let responses_dir = storage.artifacts_dir.join("responses");
+    if !responses_dir.exists() {
+        return Ok(HashMap::new());
+    }
+
+    let mut index = HashMap::new();
+    let mut completed_at_index = HashMap::<String, u64>::new();
+    for entry in fs::read_dir(&responses_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+
+        let Some(record) = read_response_record(&path)? else {
+            continue;
+        };
+
+        let should_replace = completed_at_index
+            .get(&record.exchange_id)
+            .map(|current| record.completed_at_ms >= *current)
+            .unwrap_or(true);
+        if should_replace {
+            completed_at_index.insert(record.exchange_id.clone(), record.completed_at_ms);
+            index.insert(
+                record.exchange_id.clone(),
+                ConsoleResponseDetail {
+                    artifact_path: record.artifact_path.display().to_string(),
+                    status_code: record.status_code,
+                    headers: record.headers,
+                    body_text: record.body_text,
+                    body_size_bytes: record.body_size_bytes,
+                    truncated: record.truncated,
+                    started_at_ms: record.started_at_ms,
+                    completed_at_ms: record.completed_at_ms,
+                    duration_ms: record.duration_ms,
+                },
+            );
+        }
+    }
+
+    Ok(index)
+}
+
 fn read_tool_visibility_record(path: &Path) -> io::Result<Option<ToolVisibilityArtifactRecord>> {
     let raw = fs::read_to_string(path)?;
     let value: Value = serde_json::from_str(&raw).map_err(io::Error::other)?;
@@ -2741,6 +2727,85 @@ fn read_tool_visibility_record(path: &Path) -> io::Result<Option<ToolVisibilityA
         final_tools_json,
         artifact_path: path.to_path_buf(),
     }))
+}
+
+#[derive(Default)]
+struct ToolVisibilityDetailIndex {
+    by_request_id: HashMap<String, (u64, ConsoleToolVisibilityDetail)>,
+    by_exchange_id: HashMap<String, (u64, ConsoleToolVisibilityDetail)>,
+}
+
+fn build_tool_visibility_detail_index(
+    storage: &StorageLayout,
+) -> io::Result<ToolVisibilityDetailIndex> {
+    let visibility_dir = storage.artifacts_dir.join("tool_visibility");
+    if !visibility_dir.exists() {
+        return Ok(ToolVisibilityDetailIndex::default());
+    }
+
+    let mut index = ToolVisibilityDetailIndex::default();
+    for entry in fs::read_dir(&visibility_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+
+        let Some(record) = read_tool_visibility_record(&path)? else {
+            continue;
+        };
+
+        let detail = ConsoleToolVisibilityDetail {
+            artifact_path: record.artifact_path.display().to_string(),
+            visibility_stage: record.visibility_stage.clone(),
+            tool_choice: record.tool_choice.clone(),
+            tool_count_final: record.tool_count_final,
+            final_tools: record.final_tools.clone(),
+            final_tools_json: record.final_tools_json.clone(),
+        };
+
+        let request_should_replace = index
+            .by_request_id
+            .get(&record.request_id)
+            .map(|(captured_at_ms, _)| record.captured_at_ms >= *captured_at_ms)
+            .unwrap_or(true);
+        if request_should_replace {
+            index
+                .by_request_id
+                .insert(record.request_id.clone(), (record.captured_at_ms, detail.clone()));
+        }
+
+        if let Some(exchange_id) = &record.exchange_id {
+            let exchange_should_replace = index
+                .by_exchange_id
+                .get(exchange_id)
+                .map(|(captured_at_ms, _)| record.captured_at_ms >= *captured_at_ms)
+                .unwrap_or(true);
+            if exchange_should_replace {
+                index
+                    .by_exchange_id
+                    .insert(exchange_id.clone(), (record.captured_at_ms, detail));
+            }
+        }
+    }
+
+    Ok(index)
+}
+
+fn select_tool_visibility_detail(
+    index: &ToolVisibilityDetailIndex,
+    request_id: &str,
+    exchange_id: Option<&str>,
+) -> Option<ConsoleToolVisibilityDetail> {
+    index
+        .by_request_id
+        .get(request_id)
+        .map(|(_, detail)| detail.clone())
+        .or_else(|| {
+            exchange_id
+                .and_then(|exchange_id| index.by_exchange_id.get(exchange_id))
+                .map(|(_, detail)| detail.clone())
+        })
 }
 
 fn parse_tool_summaries(value: &Value) -> Vec<ConsoleToolSummary> {
@@ -5058,6 +5123,120 @@ mod tests {
         );
         assert!(
             response.contains("\"tool_count_final\":1"),
+            "response: {response}"
+        );
+
+        handle.join().expect("server thread should join")?;
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn console_server_returns_filtered_sessions_api_without_unmatched_sessions() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let requests_dir = result.storage.artifacts_dir.join("requests");
+        fs::create_dir_all(&requests_dir)?;
+        fs::write(
+            requests_dir.join("1714000001000-10-1.json"),
+            serde_json::json!({
+                "event_id": "10-1714000001000-1",
+                "exchange_id": "ex-opencode",
+                "pid": 10,
+                "target_display_name": "opencode",
+                "provider_hint": "openai",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.openai.com/v1/responses",
+                "body_text": "{\"model\":\"gpt-4.1\"}",
+                "body_size_bytes": 19,
+                "truncated": false,
+                "captured_at_ms": 1714000001000u64,
+            })
+            .to_string(),
+        )?;
+        fs::write(
+            requests_dir.join("1714000002000-20-1.json"),
+            serde_json::json!({
+                "event_id": "20-1714000002000-1",
+                "exchange_id": "ex-codex",
+                "pid": 20,
+                "target_display_name": "codex",
+                "provider_hint": "openai",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.openai.com/v1/responses",
+                "body_text": "{\"model\":\"gpt-4.1\"}",
+                "body_size_bytes": 19,
+                "truncated": false,
+                "captured_at_ms": 1714000002000u64,
+            })
+            .to_string(),
+        )?;
+
+        let filter = super::ConsoleTargetFilterConfig::new(vec!["opencode".into()]);
+        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", Some(&filter))?;
+        let addr = server
+            .local_url()?
+            .trim_start_matches("http://")
+            .to_string();
+
+        let handle = thread::spawn(move || server.serve_once());
+        let response = send_get_request(&addr, "/api/sessions")?;
+
+        assert!(response.contains("\"active_filters\":[\"opencode\"]"), "response: {response}");
+        assert!(response.contains("\"target_display_name\":\"opencode\""), "response: {response}");
+        assert!(
+            !response.contains("\"target_display_name\":\"codex\""),
+            "response: {response}"
+        );
+
+        handle.join().expect("server thread should join")?;
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn console_server_filtered_session_detail_does_not_leak_unmatched_session() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let requests_dir = result.storage.artifacts_dir.join("requests");
+        fs::create_dir_all(&requests_dir)?;
+        fs::write(
+            requests_dir.join("1714000005000-77-1.json"),
+            serde_json::json!({
+                "event_id": "demo-request",
+                "exchange_id": "ex-demo",
+                "pid": 77,
+                "target_display_name": "Codex",
+                "provider_hint": "openai",
+                "hook_name": "fetch",
+                "method": "POST",
+                "url": "https://api.openai.com/v1/responses",
+                "headers": [],
+                "body_text": "{\"model\":\"gpt-4.1\"}",
+                "body_size_bytes": 19,
+                "truncated": false,
+                "captured_at_ms": 1714000005000u64,
+            })
+            .to_string(),
+        )?;
+
+        let filter = super::ConsoleTargetFilterConfig::new(vec!["opencode".into()]);
+        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", Some(&filter))?;
+        let addr = server
+            .local_url()?
+            .trim_start_matches("http://")
+            .to_string();
+
+        let handle = thread::spawn(move || server.serve_once());
+        let response = send_get_request(&addr, "/api/sessions/77-1714000005000-1")?;
+
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "response: {response}");
+        assert!(response.contains("\"status\":\"not_found\""), "response: {response}");
+        assert!(response.contains("\"active_filters\":[\"opencode\"]"), "response: {response}");
+        assert!(
+            !response.contains("\"target_display_name\":\"Codex\""),
             "response: {response}"
         );
 
