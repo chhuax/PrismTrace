@@ -37,6 +37,13 @@ fn classify_target(target: &ProcessTarget) -> (AttachReadinessStatus, String) {
         );
     }
 
+    if is_codex_target(&path, &command_line) {
+        return (
+            AttachReadinessStatus::Unsupported,
+            "Codex.app currently has no safe attach path: PrismTrace wakes Node inspector with SIGUSR1, and that signal crashes the live Codex runtime".into(),
+        );
+    }
+
     match target.runtime_kind {
         RuntimeKind::Node
             if app_name.contains("language-server")
@@ -63,6 +70,13 @@ fn classify_target(target: &ProcessTarget) -> (AttachReadinessStatus, String) {
     }
 }
 
+fn is_codex_target(path: &str, command_line: &str) -> bool {
+    path.ends_with("/applications/codex.app/contents/macos/codex")
+        || path.ends_with("/applications/codex.app/contents/resources/codex")
+        || path.ends_with("/applications/codex.app/contents/resources/node_repl")
+        || command_line.contains("/applications/codex.app/contents/resources/codex app-server")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{evaluate_target, evaluate_targets};
@@ -86,9 +100,60 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_target_marks_system_process_as_permission_denied() {
+    fn evaluate_target_marks_packaged_opencode_binary_as_supported() {
+        let target = ProcessTarget {
+            pid: 401,
+            app_name: "opencode".into(),
+            executable_path: PathBuf::from("/Users/test/.opencode/bin/opencode"),
+            command_line: Some("/Users/test/.opencode/bin/opencode".into()),
+            runtime_kind: RuntimeKind::Node,
+        };
+
+        let readiness = evaluate_target(&target);
+
+        assert_eq!(readiness.status, AttachReadinessStatus::Supported);
+        assert!(readiness.reason.contains("node"));
+    }
+
+    #[test]
+    fn evaluate_target_marks_codex_app_server_as_unsupported() {
+        let target = ProcessTarget {
+            pid: 401,
+            app_name: "codex".into(),
+            executable_path: PathBuf::from("/Applications/Codex.app/Contents/Resources/codex"),
+            command_line: Some(
+                "/Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled"
+                    .into(),
+            ),
+            runtime_kind: RuntimeKind::Node,
+        };
+
+        let readiness = evaluate_target(&target);
+
+        assert_eq!(readiness.status, AttachReadinessStatus::Unsupported);
+        assert!(readiness.reason.contains("safe attach path"));
+    }
+
+    #[test]
+    fn evaluate_target_marks_codex_main_app_as_unsupported() {
         let target = ProcessTarget {
             pid: 402,
+            app_name: "Codex".into(),
+            executable_path: PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex"),
+            command_line: Some("/Applications/Codex.app/Contents/MacOS/Codex".into()),
+            runtime_kind: RuntimeKind::Electron,
+        };
+
+        let readiness = evaluate_target(&target);
+
+        assert_eq!(readiness.status, AttachReadinessStatus::Unsupported);
+        assert!(readiness.reason.contains("Codex.app"));
+    }
+
+    #[test]
+    fn evaluate_target_marks_system_process_as_permission_denied() {
+        let target = ProcessTarget {
+            pid: 403,
             app_name: "launchd".into(),
             executable_path: PathBuf::from("/sbin/launchd"),
             command_line: None,
@@ -101,9 +166,9 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_target_keeps_unknown_when_runtime_is_not_actionable() {
+    fn evaluate_target_marks_codex_path_as_unsupported_even_when_runtime_is_unknown() {
         let target = ProcessTarget {
-            pid: 403,
+            pid: 404,
             app_name: "Codex".into(),
             executable_path: PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex"),
             command_line: None,
@@ -112,21 +177,21 @@ mod tests {
 
         let readiness = evaluate_target(&target);
 
-        assert_eq!(readiness.status, AttachReadinessStatus::Unknown);
+        assert_eq!(readiness.status, AttachReadinessStatus::Unsupported);
     }
 
     #[test]
     fn evaluate_targets_preserves_target_count() {
         let targets = vec![
             ProcessTarget {
-                pid: 404,
+                pid: 405,
                 app_name: "node".into(),
                 executable_path: PathBuf::from("/usr/local/bin/node"),
                 command_line: None,
                 runtime_kind: RuntimeKind::Node,
             },
             ProcessTarget {
-                pid: 405,
+                pid: 406,
                 app_name: "python3".into(),
                 executable_path: PathBuf::from("/usr/bin/python3"),
                 command_line: None,
@@ -142,7 +207,7 @@ mod tests {
     #[test]
     fn evaluate_target_marks_language_server_helpers_as_unknown() {
         let target = ProcessTarget {
-            pid: 406,
+            pid: 407,
             app_name: "yaml-language-server".into(),
             executable_path: PathBuf::from("/usr/local/bin/node"),
             command_line: Some(

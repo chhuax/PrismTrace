@@ -12,6 +12,18 @@ fn main() -> std::io::Result<()> {
         );
     }
 
+    if let Some(options) = codex_observe_args(&args)? {
+        let mut stdout = std::io::stdout().lock();
+        prismtrace_host::run_codex_observer_session(&result, options, &mut stdout)?;
+        return Ok(());
+    }
+
+    if let Some(options) = opencode_observe_args(&args)? {
+        let mut stdout = std::io::stdout().lock();
+        prismtrace_host::run_opencode_observer_session(&result, options, &mut stdout)?;
+        return Ok(());
+    }
+
     if let Some(pid) = attach_pid_arg(&args)? {
         let mut stdout = std::io::stdout().lock();
         prismtrace_host::run_foreground_attach_session(
@@ -119,9 +131,41 @@ fn console_target_filters_arg(args: &[String]) -> std::io::Result<Option<Vec<Str
     }
 }
 
+fn codex_observe_args(
+    args: &[String],
+) -> std::io::Result<Option<prismtrace_host::codex_observer::CodexObserverOptions>> {
+    if !args.iter().any(|arg| arg == "--codex-observe") {
+        return Ok(None);
+    }
+
+    let socket_path = arg_value(args, "--codex-socket").map(std::path::PathBuf::from);
+    Ok(Some(
+        prismtrace_host::codex_observer::CodexObserverOptions {
+            socket_path,
+            ..Default::default()
+        },
+    ))
+}
+
+fn opencode_observe_args(
+    args: &[String],
+) -> std::io::Result<Option<prismtrace_host::opencode_observer::OpencodeObserverOptions>> {
+    if !args.iter().any(|arg| arg == "--opencode-observe") {
+        return Ok(None);
+    }
+
+    let mut options = prismtrace_host::opencode_observer::OpencodeObserverOptions::default();
+    if let Some(url) = arg_value(args, "--opencode-url") {
+        options.base_url = url.to_string();
+    }
+    Ok(Some(options))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{attach_pid_arg, console_target_filters_arg};
+    use super::{
+        attach_pid_arg, codex_observe_args, console_target_filters_arg, opencode_observe_args,
+    };
 
     #[test]
     fn console_flag_is_detected_without_conflicting_with_attach_pid_parsing() {
@@ -205,5 +249,78 @@ mod tests {
             attach_pid_arg(&args).expect("parse should succeed"),
             Some(123)
         );
+    }
+
+    #[test]
+    fn codex_observe_args_returns_none_when_flag_is_missing() {
+        let args = vec!["--discover".to_string()];
+
+        assert!(
+            codex_observe_args(&args)
+                .expect("parse should succeed")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn codex_observe_args_returns_default_options_without_socket() {
+        let args = vec!["--codex-observe".to_string()];
+        let options = codex_observe_args(&args)
+            .expect("parse should succeed")
+            .expect("options should exist");
+
+        assert_eq!(options.socket_path, None);
+    }
+
+    #[test]
+    fn codex_observe_args_parses_explicit_socket_path() {
+        let args = vec![
+            "--codex-observe".to_string(),
+            "--codex-socket".to_string(),
+            "/tmp/codex-ipc/ipc-501.sock".to_string(),
+        ];
+        let options = codex_observe_args(&args)
+            .expect("parse should succeed")
+            .expect("options should exist");
+
+        assert_eq!(
+            options.socket_path,
+            Some(std::path::PathBuf::from("/tmp/codex-ipc/ipc-501.sock"))
+        );
+    }
+
+    #[test]
+    fn opencode_observe_args_returns_none_when_flag_is_missing() {
+        let args = vec!["--discover".to_string()];
+
+        assert!(
+            opencode_observe_args(&args)
+                .expect("parse should succeed")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn opencode_observe_args_uses_default_url() {
+        let args = vec!["--opencode-observe".to_string()];
+        let options = opencode_observe_args(&args)
+            .expect("parse should succeed")
+            .expect("options should exist");
+
+        assert_eq!(options.base_url, "http://127.0.0.1:4096");
+    }
+
+    #[test]
+    fn opencode_observe_args_parses_explicit_url() {
+        let args = vec![
+            "--opencode-observe".to_string(),
+            "--opencode-url".to_string(),
+            "http://127.0.0.1:7777".to_string(),
+        ];
+        let options = opencode_observe_args(&args)
+            .expect("parse should succeed")
+            .expect("options should exist");
+
+        assert_eq!(options.base_url, "http://127.0.0.1:7777");
     }
 }

@@ -353,7 +353,7 @@ pub fn consume_probe_events(
                 });
             }
             Ok(IpcEvent::HeartbeatTimeout { elapsed_ms }) => {
-                let listener = cleanup_worker(&mut worker, false);
+                let listener = cleanup_worker(&mut worker, true);
                 writeln!(output, "[probe-timeout] {} ms since heartbeat", elapsed_ms)?;
                 return Ok(ProbeConsumeOutcome {
                     exit: ProbeConsumeExit::HeartbeatTimeout { elapsed_ms },

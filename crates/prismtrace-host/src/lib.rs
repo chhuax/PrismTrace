@@ -1,7 +1,10 @@
 pub mod attach;
+pub mod codex_observer;
 pub mod console;
 pub mod discovery;
 pub mod ipc;
+pub mod observer;
+pub mod opencode_observer;
 pub mod probe_health;
 pub mod readiness;
 pub mod request_capture;
@@ -200,6 +203,24 @@ pub fn attach_snapshot_report(snapshot: &AttachSnapshot) -> String {
         attach_report(&snapshot.attach_result),
     ]
     .join("\n")
+}
+
+pub fn run_codex_observer_session(
+    result: &BootstrapResult,
+    options: codex_observer::CodexObserverOptions,
+    output: &mut impl Write,
+) -> io::Result<()> {
+    writeln!(output, "{}", startup_summary(result))?;
+    codex_observer::run_codex_observer(output, options)
+}
+
+pub fn run_opencode_observer_session(
+    result: &BootstrapResult,
+    options: opencode_observer::OpencodeObserverOptions,
+    output: &mut impl Write,
+) -> io::Result<()> {
+    writeln!(output, "{}", startup_summary(result))?;
+    opencode_observer::run_opencode_observer(output, options)
 }
 
 pub fn run_foreground_attach_session<R: InstrumentationRuntime>(

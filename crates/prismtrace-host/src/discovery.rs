@@ -74,6 +74,14 @@ fn parse_ps_line(line: &str) -> Option<ProcessSample> {
     }
 
     let command_line = rest[executable_end..].trim_start();
+    let command_line_executable = command_line.split_whitespace().next();
+    let executable_path = command_line_executable
+        .filter(|candidate| {
+            candidate.starts_with('/')
+                && executable_path.len() < candidate.len()
+                && candidate.starts_with(executable_path)
+        })
+        .unwrap_or(executable_path);
 
     Some(ProcessSample {
         pid,
@@ -156,6 +164,24 @@ mod tests {
                 "node /Users/test/.cache/opencode/packages/yaml-language-server/node_modules/.bin/yaml-language-server --stdio"
                     .into()
             )
+        );
+    }
+
+    #[test]
+    fn parse_ps_line_prefers_command_line_executable_when_comm_is_truncated() {
+        let sample =
+            parse_ps_line("11726 /Applications/Co /Applications/Codex.app/Contents/MacOS/Codex")
+                .unwrap();
+
+        assert_eq!(sample.pid, 11726);
+        assert_eq!(sample.process_name, "Codex");
+        assert_eq!(
+            sample.executable_path,
+            PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex")
+        );
+        assert_eq!(
+            sample.command_line,
+            Some("/Applications/Codex.app/Contents/MacOS/Codex".into())
         );
     }
 

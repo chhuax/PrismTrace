@@ -713,6 +713,7 @@ fn read_request_path(stream: &mut TcpStream) -> io::Result<Option<String>> {
 
 fn render_console_homepage(snapshot: &ConsoleSnapshot) -> String {
     let filter_context_html = render_filter_context_banner(snapshot.filter_context.as_ref());
+    let theme_switcher_html = render_theme_switcher();
     let targets_html =
         render_targets_panel_items(&snapshot.target_summaries, snapshot.filter_context.as_ref());
     let activity_html =
@@ -739,124 +740,279 @@ fn render_console_homepage(snapshot: &ConsoleSnapshot) -> String {
   <head>
     <meta charset=\"utf-8\" />
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-    <title>PrismTrace Local Console</title>
+    <title>PrismTrace macOS Console</title>
     <style>
       :root {{
-        color-scheme: dark;
-        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-        background: #08111f;
-        color: #e6edf7;
+        color-scheme: light dark;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+        --console-bg: #0b0e14;
+        --console-bg-accent: rgba(94, 158, 255, 0.16);
+        --console-bg-accent-soft: rgba(169, 199, 255, 0.08);
+        --console-bg-gradient-top: #0f131c;
+        --console-bg-gradient-mid: #0b0e14;
+        --console-bg-gradient-bottom: #080b10;
+        --console-text: #dce5fd;
+        --console-text-strong: #f5f8ff;
+        --console-text-muted: #a2abc1;
+        --console-border: #242c3c;
+        --console-border-soft: #1d2433;
+        --console-border-strong: #354056;
+        --console-panel: #141a25;
+        --console-panel-recessed: #0f131c;
+        --console-panel-elevated: #18202e;
+        --console-list-item: linear-gradient(180deg, #111722, #0f131c);
+        --console-list-item-hover: linear-gradient(180deg, #131b28, #101622);
+        --console-code-bg: #090d13;
+        --console-pill-bg: #1b2331;
+        --console-pill-hover: #243049;
+        --console-accent: #5e9eff;
+        --console-accent-soft: #a9c7ff;
+        --console-error-border: #563039;
+        --console-error-bg: rgba(73, 23, 31, 0.48);
+        background: var(--console-bg);
+        color: var(--console-text);
+      }}
+      @media (prefers-color-scheme: light) {{
+        :root {{
+          --console-bg: #f6f7fb;
+          --console-bg-accent: rgba(94, 158, 255, 0.12);
+          --console-bg-accent-soft: rgba(169, 199, 255, 0.14);
+          --console-bg-gradient-top: #fbfcff;
+          --console-bg-gradient-mid: #f3f5fa;
+          --console-bg-gradient-bottom: #eef1f7;
+          --console-text: #273142;
+          --console-text-strong: #121a27;
+          --console-text-muted: #5c687a;
+          --console-border: #d5dce8;
+          --console-border-soft: #e3e8f0;
+          --console-border-strong: #c4cfde;
+          --console-panel: rgba(255, 255, 255, 0.84);
+          --console-panel-recessed: rgba(247, 249, 253, 0.96);
+          --console-panel-elevated: rgba(255, 255, 255, 0.98);
+          --console-list-item: linear-gradient(180deg, #ffffff, #f7f9fd);
+          --console-list-item-hover: linear-gradient(180deg, #ffffff, #f1f5fb);
+          --console-code-bg: #edf2f8;
+          --console-pill-bg: #edf2fb;
+          --console-pill-hover: #dfe8f7;
+          --console-accent: #356dce;
+          --console-accent-soft: #295db5;
+          --console-error-border: #e0b7bc;
+          --console-error-bg: rgba(172, 34, 56, 0.08);
+        }}
       }}
       * {{ box-sizing: border-box; }}
       body.console-shell {{
         margin: 0;
         min-height: 100vh;
-        background: radial-gradient(circle at top, #13233f 0%, #08111f 52%, #050914 100%);
-        color: #e6edf7;
+        background:
+          radial-gradient(circle at top left, var(--console-bg-accent), transparent 30%),
+          radial-gradient(circle at top right, var(--console-bg-accent-soft), transparent 26%),
+          linear-gradient(180deg, var(--console-bg-gradient-top) 0%, var(--console-bg-gradient-mid) 44%, var(--console-bg-gradient-bottom) 100%);
+        color: var(--console-text);
       }}
       .console-frame {{
-        max-width: 1440px;
+        max-width: 1540px;
         margin: 0 auto;
-        padding: 32px 24px 40px;
+        padding: 24px 20px 32px;
+      }}
+      .console-frame-pro {{
+        position: relative;
       }}
       .console-header {{
         display: grid;
-        gap: 16px;
-        padding: 24px;
-        border: 1px solid #223455;
-        border-radius: 20px;
-        background: rgba(10, 18, 34, 0.88);
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+        gap: 18px;
+        padding: 22px;
+        border: 1px solid var(--console-border);
+        border-radius: 18px;
+        background:
+          linear-gradient(180deg, rgba(29, 38, 55, 0.94), rgba(20, 26, 37, 0.96));
+        box-shadow: 0 20px 48px rgba(0, 0, 0, 0.24);
       }}
       .console-eyebrow {{
         margin: 0;
-        color: #8dd0ff;
-        font-size: 13px;
+        color: var(--console-accent-soft);
+        font-size: 11px;
         font-weight: 600;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.12em;
         text-transform: uppercase;
       }}
       .console-header-main {{
-        display: flex;
-        flex-wrap: wrap;
-        align-items: end;
-        justify-content: space-between;
-        gap: 16px;
+        display: grid;
+        grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.75fr);
+        gap: 18px;
+        align-items: start;
       }}
-      .console-title-group {{ display: grid; gap: 10px; }}
+      .console-title-group {{
+        display: grid;
+        gap: 10px;
+      }}
       .console-summary {{
         margin: 0;
         white-space: pre-line;
-        color: #9cb0d1;
-        line-height: 1.5;
+        color: var(--console-text-muted);
+        line-height: 1.55;
+      }}
+      .console-header-meta {{
+        display: grid;
+        gap: 12px;
+        align-content: start;
       }}
       .console-entrypoint {{
-        display: inline-flex;
-        flex-direction: column;
-        gap: 6px;
-        padding: 12px 14px;
-        border: 1px solid #23385c;
+        display: grid;
+        gap: 8px;
+        padding: 14px;
+        border: 1px solid var(--console-border);
         border-radius: 14px;
-        background: rgba(7, 13, 24, 0.9);
+        background: var(--console-panel-recessed);
       }}
       .console-entrypoint-label {{
         margin: 0;
-        color: #9cb0d1;
-        font-size: 12px;
+        color: var(--console-text-muted);
+        font-size: 11px;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.12em;
       }}
-      .console-layout {{
+      .console-entrypoint-group,
+      .console-theme-switch {{
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 16px;
-        margin-top: 20px;
+        gap: 12px;
       }}
-      .console-secondary-layout {{
+      .console-workbench {{
         display: grid;
-        grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
+        grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.92fr);
         gap: 16px;
         margin-top: 16px;
+      }}
+      .console-primary-column,
+      .console-inspector-stack {{
+        display: grid;
+        gap: 16px;
+        align-content: start;
+      }}
+      .console-overview-grid {{
+        display: grid;
+        grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1fr);
+        gap: 16px;
+      }}
+      .console-activity-stack {{
+        display: grid;
+        gap: 16px;
       }}
       .console-panel {{
         display: grid;
         grid-template-rows: auto 1fr;
-        min-height: 320px;
-        border: 1px solid #223455;
-        border-radius: 20px;
-        background: rgba(10, 18, 34, 0.84);
-        box-shadow: 0 14px 36px rgba(0, 0, 0, 0.2);
+        min-height: 0;
+        border: 1px solid var(--console-border);
+        border-radius: 18px;
+        background: var(--console-panel);
         overflow: hidden;
       }}
+      .console-panel.is-recessed {{
+        background: var(--console-panel-recessed);
+      }}
+      .console-panel.is-dense {{
+        min-height: 260px;
+      }}
+      .console-panel.is-tall {{
+        min-height: 348px;
+      }}
       .console-panel-header {{
-        padding: 18px 18px 14px;
-        border-bottom: 1px solid #1f2f4d;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 16px 12px;
+        border-bottom: 1px solid var(--console-border-soft);
+        background: linear-gradient(180deg, rgba(29, 38, 55, 0.55), rgba(20, 26, 37, 0));
       }}
       .console-panel-body {{
         display: grid;
         align-content: start;
         gap: 12px;
-        padding: 18px;
+        padding: 14px 16px 16px;
       }}
       .console-list {{
         display: grid;
-        gap: 12px;
+        gap: 10px;
+      }}
+      .console-request-stream {{
+        gap: 8px;
       }}
       .console-list-item {{
-        padding: 14px;
-        border: 1px solid #23385c;
-        border-radius: 14px;
-        background: rgba(9, 15, 28, 0.82);
+        padding: 12px;
+        border: 1px solid var(--console-border);
+        border-radius: 12px;
+        background: var(--console-list-item);
+      }}
+      .console-list-item.is-actionable {{
+        cursor: pointer;
+        transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+      }}
+      .console-list-item.is-actionable:hover {{
+        border-color: var(--console-accent);
+        background: var(--console-list-item-hover);
+        transform: translateY(-1px);
+      }}
+      .console-list-item.is-actionable:focus-visible {{
+        outline: 2px solid var(--console-accent);
+        outline-offset: 2px;
+      }}
+      .console-request-stream-item {{
+        display: grid;
+        gap: 10px;
+      }}
+      .console-request-stream-top {{
+        display: grid;
+        grid-template-columns: 92px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+      }}
+      .console-request-stream-kicker {{
+        color: var(--console-accent);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }}
+      .console-request-stream-main {{
+        display: grid;
+        gap: 4px;
+      }}
+      .console-request-stream-route {{
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }}
+      .console-request-stream-method {{
+        display: inline-flex;
+        align-items: center;
+        min-height: 20px;
+        padding: 0 8px;
+        border-radius: 999px;
+        border: 1px solid var(--console-border-strong);
+        background: color-mix(in srgb, var(--console-pill-bg) 88%, transparent);
+        color: var(--console-accent);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }}
+      .console-request-stream-path {{
+        color: var(--console-text-muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
       }}
       .console-list-title {{
         margin: 0;
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 600;
-        color: #f4f8ff;
+        color: var(--console-text-strong);
       }}
       .console-list-subtitle {{
         margin: 6px 0 0;
-        color: #9cb0d1;
+        color: var(--console-text-muted);
+        font-size: 13px;
       }}
       .console-list-meta {{
         display: flex;
@@ -864,59 +1020,98 @@ fn render_console_homepage(snapshot: &ConsoleSnapshot) -> String {
         gap: 8px;
         margin-top: 10px;
       }}
-      .console-detail-grid {{ display: grid; gap: 12px; }}
+      .console-detail-grid {{
+        display: grid;
+        gap: 12px;
+      }}
+      .console-detail-grid-inspector {{
+        gap: 14px;
+      }}
       .console-detail-row {{
         display: grid;
         gap: 6px;
-        padding: 12px 14px;
-        border: 1px solid #23385c;
-        border-radius: 14px;
-        background: rgba(9, 15, 28, 0.82);
+        padding: 11px 12px;
+        border: 1px solid var(--console-border);
+        border-radius: 12px;
+        background: var(--console-panel-recessed);
       }}
       .console-detail-label {{
-        color: #9cb0d1;
-        font-size: 12px;
+        color: var(--console-text-muted);
+        font-size: 11px;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.12em;
       }}
       .console-detail-section {{
         display: grid;
         gap: 12px;
         padding: 14px;
-        border: 1px solid #23385c;
-        border-radius: 16px;
-        background: rgba(9, 15, 28, 0.82);
+        border: 1px solid var(--console-border);
+        border-radius: 14px;
+        background: linear-gradient(180deg, var(--console-panel-elevated), var(--console-panel));
       }}
       .console-detail-section-title {{
         margin: 0;
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 700;
-        color: #f4f8ff;
+        color: var(--console-text-strong);
+        letter-spacing: 0.02em;
       }}
       .console-code-block {{
         margin: 0;
         padding: 12px 14px;
-        border: 1px solid #1f2f4d;
+        border: 1px solid var(--console-border);
         border-radius: 12px;
-        background: rgba(6, 11, 20, 0.92);
-        color: #d9e7ff;
+        background: var(--console-code-bg);
+        color: var(--console-text);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 12px;
-        line-height: 1.55;
+        line-height: 1.6;
         overflow: auto;
         white-space: pre-wrap;
         word-break: break-word;
       }}
-      .console-health-stack {{ display: grid; gap: 12px; }}
+      .console-timeline-list {{
+        position: relative;
+        gap: 12px;
+        padding-left: 18px;
+      }}
+      .console-timeline-list::before {{
+        content: \"\";
+        position: absolute;
+        left: 7px;
+        top: 4px;
+        bottom: 4px;
+        width: 1px;
+        background: linear-gradient(180deg, var(--console-accent-soft), color-mix(in srgb, var(--console-border) 72%, transparent));
+      }}
+      .console-timeline-item {{
+        position: relative;
+      }}
+      .console-timeline-item::before {{
+        content: \"\";
+        position: absolute;
+        left: -16px;
+        top: 18px;
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        border: 2px solid var(--console-accent);
+        background: var(--console-panel-elevated);
+      }}
+      .console-health-stack {{
+        display: grid;
+        gap: 10px;
+      }}
       .console-health-card {{
-        padding: 14px;
-        border-radius: 14px;
-        border: 1px solid #23385c;
-        background: rgba(9, 15, 28, 0.82);
+        padding: 12px;
+        border-radius: 12px;
+        border: 1px solid var(--console-border);
+        background: var(--console-panel-recessed);
       }}
       .console-health-card.is-error {{
-        border-color: #7d3344;
-        background: rgba(49, 15, 24, 0.35);
+        border-color: var(--console-error-border);
+        background: var(--console-error-bg);
       }}
       .console-pill {{
         display: inline-flex;
@@ -924,99 +1119,150 @@ fn render_console_homepage(snapshot: &ConsoleSnapshot) -> String {
         min-height: 24px;
         padding: 0 10px;
         border-radius: 999px;
-        border: 1px solid #31507c;
-        background: rgba(19, 35, 63, 0.72);
-        color: #cfe1ff;
-        font-size: 12px;
+        border: 1px solid var(--console-border-strong);
+        background: var(--console-pill-bg);
+        color: var(--console-text);
+        font-size: 11px;
+        line-height: 1;
+      }}
+      .console-pill.is-selected {{
+        border-color: var(--console-accent);
+        color: var(--console-accent);
+      }}
+      a.console-pill,
+      button.console-pill {{
         cursor: pointer;
+        text-decoration: none;
+      }}
+      button.console-pill {{
+        appearance: none;
+        font: inherit;
+      }}
+      a.console-pill:hover,
+      button.console-pill:hover {{
+        border-color: var(--console-accent);
+        background: var(--console-pill-hover);
+      }}
+      a.console-pill:focus-visible,
+      button.console-pill:focus-visible {{
+        outline: 2px solid var(--console-accent);
+        outline-offset: 2px;
       }}
       .console-placeholder {{
         margin: 0;
         padding: 14px;
-        border: 1px dashed #31507c;
-        border-radius: 14px;
-        background: rgba(9, 15, 28, 0.82);
+        border: 1px dashed var(--console-border-strong);
+        border-radius: 12px;
+        background: var(--console-panel-recessed);
       }}
       h1, h2 {{ margin: 0; }}
-      h1 {{ font-size: 32px; line-height: 1.1; }}
-      h2 {{ font-size: 20px; line-height: 1.2; }}
+      h1 {{
+        font-size: 34px;
+        line-height: 1.05;
+        letter-spacing: -0.02em;
+      }}
+      h2 {{
+        font-size: 16px;
+        line-height: 1.2;
+        letter-spacing: 0.01em;
+      }}
       p {{ margin: 0; line-height: 1.5; }}
-      .muted {{ color: #9cb0d1; }}
-      code {{ color: #8dd0ff; word-break: break-all; }}
-      @media (max-width: 1080px) {{
-        .console-layout {{ grid-template-columns: 1fr; }}
-        .console-secondary-layout {{ grid-template-columns: 1fr; }}
+      .muted {{ color: var(--console-text-muted); }}
+      code {{
+        color: var(--console-accent-soft);
+        word-break: break-all;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }}
+      @media (max-width: 1180px) {{
+        .console-workbench,
+        .console-header-main,
+        .console-overview-grid {{
+          grid-template-columns: 1fr;
+        }}
       }}
     </style>
   </head>
-  <body class=\"console-shell\">
-    <div class=\"console-frame\">
+  <body class=\"console-shell\" data-theme=\"system\">
+    <div class=\"console-frame console-frame-pro\">
       <header class=\"console-header\">
         <p class=\"console-eyebrow\">Local-first observability</p>
         <div class=\"console-header-main\">
           <div class=\"console-title-group\">
-            <h1>PrismTrace Local Console</h1>
+            <h1>PrismTrace macOS Console</h1>
             <p class=\"console-summary\">{}</p>
           </div>
-          <div class=\"console-entrypoint\">
-            <p class=\"console-entrypoint-label\">Browser entrypoint</p>
-            <p><code>{}</code></p>
+          <div class=\"console-header-meta\">
+            <div class=\"console-entrypoint-group\">
+              <div class=\"console-entrypoint\">
+                <p class=\"console-entrypoint-label\">Browser entrypoint</p>
+                <p><a class=\"console-pill\" href=\"{}\"><code>{}</code></a></p>
+              </div>
+              {}
+            </div>
+            {}
           </div>
         </div>
-        {}
       </header>
-      <main class=\"console-layout\">
-        <section class=\"console-panel\" aria-labelledby=\"targets-heading\">
-          <div class=\"console-panel-header\">
-            <h2 id=\"targets-heading\">Targets</h2>
+      <main class=\"console-workbench\">
+        <div class=\"console-primary-column\">
+          <div class=\"console-overview-grid\">
+            <section class=\"console-panel is-dense\" aria-labelledby=\"targets-heading\">
+              <div class=\"console-panel-header\">
+                <h2 id=\"targets-heading\">Targets</h2>
+              </div>
+              <div class=\"console-panel-body\" id=\"targets-region\">{}</div>
+            </section>
+            <div class=\"console-activity-stack\">
+              <section class=\"console-panel is-dense is-recessed\" aria-labelledby=\"activity-heading\">
+                <div class=\"console-panel-header\">
+                  <h2 id=\"activity-heading\">Activity</h2>
+                </div>
+                <div class=\"console-panel-body\" id=\"activity-region\">{}</div>
+              </section>
+              <section class=\"console-panel is-dense is-recessed\" aria-labelledby=\"sessions-heading\">
+                <div class=\"console-panel-header\">
+                  <h2 id=\"sessions-heading\">Sessions</h2>
+                </div>
+                <div class=\"console-panel-body\" id=\"sessions-region\">{}</div>
+              </section>
+            </div>
           </div>
-          <div class=\"console-panel-body\" id=\"targets-region\">{}</div>
-        </section>
-        <section class=\"console-panel\" aria-labelledby=\"activity-heading\">
-          <div class=\"console-panel-header\">
-            <h2 id=\"activity-heading\">Activity</h2>
-          </div>
-          <div class=\"console-panel-body\" id=\"activity-region\">{}</div>
-        </section>
-        <section class=\"console-panel\" aria-labelledby=\"requests-heading\">
-          <div class=\"console-panel-header\">
-            <h2 id=\"requests-heading\">Requests</h2>
-          </div>
-          <div class=\"console-panel-body\" id=\"requests-region\">{}</div>
-        </section>
-        <section class=\"console-panel\" aria-labelledby=\"sessions-heading\">
-          <div class=\"console-panel-header\">
-            <h2 id=\"sessions-heading\">Sessions</h2>
-          </div>
-          <div class=\"console-panel-body\" id=\"sessions-region\">{}</div>
-        </section>
+          <section class=\"console-panel is-tall\" aria-labelledby=\"requests-heading\">
+            <div class=\"console-panel-header\">
+              <h2 id=\"requests-heading\">Requests</h2>
+            </div>
+            <div class=\"console-panel-body\" id=\"requests-region\">{}</div>
+          </section>
+        </div>
+        <aside class=\"console-inspector-stack\">
+          <section class=\"console-panel is-recessed\" aria-labelledby=\"session-detail-heading\">
+            <div class=\"console-panel-header\">
+              <h2 id=\"session-detail-heading\">Session Timeline</h2>
+            </div>
+            <div class=\"console-panel-body\" id=\"session-detail-region\">{}</div>
+          </section>
+          <section class=\"console-panel\" aria-labelledby=\"request-detail-heading\">
+            <div class=\"console-panel-header\">
+              <h2 id=\"request-detail-heading\">Request Detail</h2>
+            </div>
+            <div class=\"console-panel-body\" id=\"request-detail-region\">{}</div>
+          </section>
+          <section class=\"console-panel is-recessed\" aria-labelledby=\"health-heading\">
+            <div class=\"console-panel-header\">
+              <h2 id=\"health-heading\">Observability Health</h2>
+            </div>
+            <div class=\"console-panel-body\" id=\"health-region\">{}</div>
+          </section>
+        </aside>
       </main>
-      <section class=\"console-secondary-layout\">
-        <section class=\"console-panel\" aria-labelledby=\"session-detail-heading\">
-          <div class=\"console-panel-header\">
-            <h2 id=\"session-detail-heading\">Session Timeline</h2>
-          </div>
-          <div class=\"console-panel-body\" id=\"session-detail-region\">{}</div>
-        </section>
-        <section class=\"console-panel\" aria-labelledby=\"request-detail-heading\">
-          <div class=\"console-panel-header\">
-            <h2 id=\"request-detail-heading\">Request Detail</h2>
-          </div>
-          <div class=\"console-panel-body\" id=\"request-detail-region\">{}</div>
-        </section>
-        <section class=\"console-panel\" aria-labelledby=\"health-heading\">
-          <div class=\"console-panel-header\">
-            <h2 id=\"health-heading\">Observability Health</h2>
-          </div>
-          <div class=\"console-panel-body\" id=\"health-region\">{}</div>
-        </section>
-      </section>
     </div>
     <script>{}</script>
   </body>
 </html>",
         snapshot.summary,
         snapshot.bind_addr,
+        snapshot.bind_addr,
+        theme_switcher_html,
         filter_context_html,
         targets_html,
         activity_html,
@@ -1052,6 +1298,26 @@ fn render_filter_context_banner(filter_context: Option<&ConsoleFilterContext>) -
     )
 }
 
+fn render_theme_switcher() -> String {
+    let buttons = [
+        ("system", "System"),
+        ("dark", "Dark"),
+        ("light", "Light"),
+    ]
+    .into_iter()
+    .map(|(theme, label)| {
+        format!(
+            "<a class=\"console-pill\" href=\"?theme={theme}\" data-theme-switch=\"{theme}\">{label}</a>"
+        )
+    })
+    .collect::<Vec<_>>()
+    .join("");
+
+    format!(
+        "<div class=\"console-entrypoint console-theme-switch\"><p class=\"console-entrypoint-label\">Theme</p><div class=\"console-list-meta\">{buttons}</div></div>"
+    )
+}
+
 fn render_console_homepage_script(
     initial_session: Option<&ConsoleSessionSummary>,
     initial_request: Option<&ConsoleRequestSummary>,
@@ -1063,6 +1329,29 @@ fn render_console_homepage_script(
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+
+      const readThemePreference = () => {
+        const url = new URL(window.location.href);
+        const theme = url.searchParams.get('theme');
+        if (theme === 'dark' || theme === 'light' || theme === 'system') {
+          window.localStorage.setItem('prismtrace-console-theme', theme);
+          return theme;
+        }
+
+        const stored = window.localStorage.getItem('prismtrace-console-theme');
+        if (stored === 'dark' || stored === 'light' || stored === 'system') {
+          return stored;
+        }
+
+        return 'system';
+      };
+
+      const applyThemePreference = (theme) => {
+        document.body.dataset.theme = theme;
+        document.querySelectorAll('[data-theme-switch]').forEach((item) => {
+          item.classList.toggle('is-selected', item.getAttribute('data-theme-switch') === theme);
+        });
+      };
 
       const renderEmptyState = (text) => `<p class="muted console-placeholder">${escapeHtml(text)}</p>`;
 
@@ -1094,10 +1383,18 @@ fn render_console_homepage_script(
 
       const renderRequests = (payload) => {
         if (!payload.requests?.length) return renderEmptyState(payload.empty_state || '尚无请求记录');
-        return `<div class="console-list">${payload.requests.map((request) => `
-          <article class="console-list-item" data-request-id="${escapeHtml(request.request_id)}">
-            <p class="console-list-title">${escapeHtml(request.summary_text)}</p>
-            <p class="console-list-subtitle">${escapeHtml(request.target_display_name)}</p>
+        return `<div class="console-list console-request-stream">${payload.requests.map((request) => `
+          <article class="console-list-item is-actionable console-request-stream-item" data-request-id="${escapeHtml(request.request_id)}" data-request-detail-trigger="${escapeHtml(request.request_id)}" tabindex="0" role="button" aria-label="view request detail for ${escapeHtml(request.summary_text)}">
+            <div class="console-request-stream-top">
+              <p class="console-request-stream-kicker">ts ${escapeHtml(request.captured_at_ms)}</p>
+              <div class="console-request-stream-main">
+                <p class="console-list-title">${escapeHtml(request.summary_text)}</p>
+                <div class="console-request-stream-route">
+                  <span class="console-request-stream-method">POST</span>
+                  <span class="console-request-stream-path">${escapeHtml(request.target_display_name)}</span>
+                </div>
+              </div>
+            </div>
             <div class="console-list-meta">
               <span class="console-pill">provider: ${escapeHtml(request.provider)}</span>
               <span class="console-pill">model: ${escapeHtml(request.model || 'unknown')}</span>
@@ -1109,7 +1406,7 @@ fn render_console_homepage_script(
       const renderSessions = (payload) => {
         if (!payload.sessions?.length) return renderEmptyState(payload.empty_state || '尚无会话记录');
         return `<div class="console-list">${payload.sessions.map((session) => `
-          <article class="console-list-item" data-session-id="${escapeHtml(session.session_id)}">
+          <article class="console-list-item is-actionable" data-session-id="${escapeHtml(session.session_id)}" data-session-detail-trigger="${escapeHtml(session.session_id)}" tabindex="0" role="button" aria-label="view session timeline for ${escapeHtml(session.target_display_name)}">
             <p class="console-list-title">${escapeHtml(session.target_display_name)}</p>
             <p class="console-list-subtitle">PID ${escapeHtml(session.pid)} · ${escapeHtml(session.started_at_ms)} → ${escapeHtml(session.completed_at_ms)}</p>
             <div class="console-list-meta">
@@ -1154,7 +1451,7 @@ fn render_console_homepage_script(
 
         const response = request.response;
         const toolVisibility = request.tool_visibility;
-        return `<div class="console-detail-grid">
+        return `<div class="console-detail-grid console-detail-grid-inspector">
           <section class="console-detail-section">
             <p class="console-detail-section-title">Request Overview</p>
             <div class="console-detail-row">
@@ -1278,8 +1575,8 @@ fn render_console_homepage_script(
           </section>
           <section class="console-detail-section">
             <p class="console-detail-section-title">Timeline</p>
-            <div class="console-list">${session.timeline_items.map((item) => `
-              <article class="console-list-item">
+            <div class="console-list console-timeline-list">${session.timeline_items.map((item) => `
+              <article class="console-list-item is-actionable console-timeline-item" data-request-detail-trigger="${escapeHtml(item.request_id)}" tabindex="0" role="button" aria-label="view request detail for ${escapeHtml(item.request_summary)}">
                 <p class="console-list-title">${escapeHtml(item.request_summary)}</p>
                 <p class="console-list-subtitle">${escapeHtml(item.started_at_ms)} → ${escapeHtml(item.completed_at_ms)} · ${escapeHtml(item.target_display_name)}</p>
                 <div class="console-list-meta">
@@ -1362,6 +1659,16 @@ fn render_console_homepage_script(
         if (!sessionTrigger) return;
         void refreshSessionDetail(sessionTrigger.getAttribute('data-session-detail-trigger'));
       });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const trigger = event.target.closest('[data-request-detail-trigger], [data-session-detail-trigger]');
+        if (!trigger) return;
+        event.preventDefault();
+        trigger.click();
+      });
+
+      applyThemePreference(readThemePreference());
 
       void refreshRegion("/api/targets", "targets-region", renderTargets);
       void refreshRegion("/api/activity", "activity-region", renderActivity);
@@ -1464,8 +1771,11 @@ fn render_requests_panel_items(
         .iter()
         .map(|request| {
             format!(
-                "<article class=\"console-list-item\" data-request-id=\"{}\"><p class=\"console-list-title\">{}</p><p class=\"console-list-subtitle\">{}</p><div class=\"console-list-meta\"><span class=\"console-pill\">provider: {}</span><span class=\"console-pill\">model: {}</span><button type=\"button\" class=\"console-pill\" data-request-detail-trigger=\"{}\">view detail</button></div></article>",
+                "<article class=\"console-list-item is-actionable console-request-stream-item\" data-request-id=\"{}\" data-request-detail-trigger=\"{}\" tabindex=\"0\" role=\"button\" aria-label=\"view request detail for {}\"><div class=\"console-request-stream-top\"><p class=\"console-request-stream-kicker\">ts {}</p><div class=\"console-request-stream-main\"><p class=\"console-list-title\">{}</p><div class=\"console-request-stream-route\"><span class=\"console-request-stream-method\">POST</span><span class=\"console-request-stream-path\">{}</span></div></div></div><div class=\"console-list-meta\"><span class=\"console-pill\">provider: {}</span><span class=\"console-pill\">model: {}</span><button type=\"button\" class=\"console-pill\" data-request-detail-trigger=\"{}\">view detail</button></div></article>",
                 escape_html(&request.request_id),
+                escape_html(&request.request_id),
+                escape_html(&request.summary_text),
+                request.captured_at_ms,
                 escape_html(&request.summary_text),
                 escape_html(&request.target_display_name),
                 escape_html(&request.provider),
@@ -1476,7 +1786,7 @@ fn render_requests_panel_items(
         .collect::<Vec<_>>()
         .join("");
 
-    format!("<div class=\"console-list\">{items}</div>")
+    format!("<div class=\"console-list console-request-stream\">{items}</div>")
 }
 
 fn render_sessions_panel_items(
@@ -1494,8 +1804,10 @@ fn render_sessions_panel_items(
         .iter()
         .map(|session| {
             format!(
-                "<article class=\"console-list-item\" data-session-id=\"{}\"><p class=\"console-list-title\">{}</p><p class=\"console-list-subtitle\">PID {} · {} → {}</p><div class=\"console-list-meta\"><span class=\"console-pill\">exchanges: {}</span><span class=\"console-pill\">responses: {}</span><button type=\"button\" class=\"console-pill\" data-session-detail-trigger=\"{}\">view timeline</button></div></article>",
+                "<article class=\"console-list-item is-actionable\" data-session-id=\"{}\" data-session-detail-trigger=\"{}\" tabindex=\"0\" role=\"button\" aria-label=\"view session timeline for {}\"><p class=\"console-list-title\">{}</p><p class=\"console-list-subtitle\">PID {} · {} → {}</p><div class=\"console-list-meta\"><span class=\"console-pill\">exchanges: {}</span><span class=\"console-pill\">responses: {}</span><button type=\"button\" class=\"console-pill\" data-session-detail-trigger=\"{}\">view timeline</button></div></article>",
                 escape_html(&session.session_id),
+                escape_html(&session.session_id),
+                escape_html(&session.target_display_name),
                 escape_html(&session.target_display_name),
                 session.pid,
                 session.started_at_ms,
@@ -1593,7 +1905,7 @@ fn render_tool_summaries_html(tools: &[ConsoleToolSummary], empty_text: &str) ->
 fn render_request_detail_panel(detail: Option<&ConsoleRequestDetail>) -> String {
     match detail {
         Some(detail) => format!(
-            "<div class=\"console-detail-grid\">\
+            "<div class=\"console-detail-grid console-detail-grid-inspector\">\
                 <section class=\"console-detail-section\">\
                   <p class=\"console-detail-section-title\">Request Overview</p>\
                   <div class=\"console-detail-row\"><p class=\"console-detail-label\">Request Summary</p><p class=\"console-list-title\">{}</p></div>\
@@ -1709,7 +2021,9 @@ fn render_session_detail_panel(detail: Option<&ConsoleSessionDetail>) -> String 
                 .iter()
                 .map(|item| {
                     format!(
-                        "<article class=\"console-list-item\"><p class=\"console-list-title\">{}</p><p class=\"console-list-subtitle\">{} → {} · {}</p><div class=\"console-list-meta\"><span class=\"console-pill\">provider: {}</span><span class=\"console-pill\">model: {}</span><span class=\"console-pill\">status: {}</span><span class=\"console-pill\">tools: {}</span><button type=\"button\" class=\"console-pill\" data-request-detail-trigger=\"{}\">view request</button></div></article>",
+                        "<article class=\"console-list-item is-actionable console-timeline-item\" data-request-detail-trigger=\"{}\" tabindex=\"0\" role=\"button\" aria-label=\"view request detail for {}\"><p class=\"console-list-title\">{}</p><p class=\"console-list-subtitle\">{} → {} · {}</p><div class=\"console-list-meta\"><span class=\"console-pill\">provider: {}</span><span class=\"console-pill\">model: {}</span><span class=\"console-pill\">status: {}</span><span class=\"console-pill\">tools: {}</span><button type=\"button\" class=\"console-pill\" data-request-detail-trigger=\"{}\">view request</button></div></article>",
+                        escape_html(&item.request_id),
+                        escape_html(&item.request_summary),
                         escape_html(&item.request_summary),
                         item.started_at_ms,
                         item.completed_at_ms,
@@ -1736,7 +2050,7 @@ fn render_session_detail_panel(detail: Option<&ConsoleSessionDetail>) -> String 
                 if items.is_empty() {
                     render_console_empty_state("当前 session 尚无 timeline item")
                 } else {
-                    format!("<div class=\"console-list\">{items}</div>")
+                    format!("<div class=\"console-list console-timeline-list\">{items}</div>")
                 }
             )
         }
@@ -3616,7 +3930,7 @@ mod tests {
             .nth(1)
             .expect("response should include body");
 
-        assert!(body.contains("PrismTrace Local Console"), "body: {body}");
+        assert!(body.contains("PrismTrace macOS Console"), "body: {body}");
         assert!(body.contains("Targets"), "body: {body}");
         assert!(body.contains("Activity"), "body: {body}");
         assert!(body.contains("Requests"), "body: {body}");
@@ -3627,7 +3941,7 @@ mod tests {
     }
 
     #[test]
-    fn render_console_homepage_exposes_shell_and_three_primary_regions() {
+    fn render_console_homepage_exposes_shell_and_primary_regions() {
         let homepage = super::render_console_homepage(&ConsoleSnapshot {
             summary: "PrismTrace host skeleton".into(),
             bind_addr: "http://127.0.0.1:7799".into(),
@@ -3641,26 +3955,23 @@ mod tests {
         });
 
         assert!(
-            homepage.contains("<body class=\"console-shell\">"),
+            homepage.contains("<body class=\"console-shell\" data-theme=\"system\">"),
             "homepage: {homepage}"
         );
         assert!(
-            homepage.contains("<main class=\"console-layout\">"),
+            homepage.contains("<main class=\"console-workbench\">"),
             "homepage: {homepage}"
         );
         assert!(
-            homepage
-                .contains("<section class=\"console-panel\" aria-labelledby=\"targets-heading\">"),
+            homepage.contains("aria-labelledby=\"targets-heading\""),
             "homepage: {homepage}"
         );
         assert!(
-            homepage
-                .contains("<section class=\"console-panel\" aria-labelledby=\"activity-heading\">"),
+            homepage.contains("aria-labelledby=\"activity-heading\""),
             "homepage: {homepage}"
         );
         assert!(
-            homepage
-                .contains("<section class=\"console-panel\" aria-labelledby=\"requests-heading\">"),
+            homepage.contains("aria-labelledby=\"requests-heading\""),
             "homepage: {homepage}"
         );
         assert!(
@@ -3673,6 +3984,181 @@ mod tests {
         );
         assert!(
             homepage.contains("id=\"requests-region\""),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("class=\"console-inspector-stack\""),
+            "homepage: {homepage}"
+        );
+    }
+
+    #[test]
+    fn render_console_homepage_uses_pro_dark_console_shell() {
+        let homepage = super::render_console_homepage(&ConsoleSnapshot {
+            summary: "PrismTrace host skeleton".into(),
+            bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
+            target_summaries: vec![],
+            activity_items: vec![],
+            request_summaries: vec![],
+            session_summaries: vec![],
+            request_details: vec![],
+            session_details: vec![],
+        });
+
+        assert!(
+            homepage.contains("<title>PrismTrace macOS Console</title>"),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("<h1>PrismTrace macOS Console</h1>"),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("class=\"console-frame console-frame-pro\""),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("<main class=\"console-workbench\">"),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("class=\"console-inspector-stack\""),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("<link rel=\"stylesheet\" href=\"/assets/console.css\""),
+            "homepage: {homepage}"
+        );
+    }
+
+    #[test]
+    fn render_console_homepage_exposes_theme_switcher_and_light_theme_tokens() {
+        let homepage = super::render_console_homepage(&ConsoleSnapshot {
+            summary: "PrismTrace host skeleton".into(),
+            bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
+            target_summaries: vec![],
+            activity_items: vec![],
+            request_summaries: vec![],
+            session_summaries: vec![],
+            request_details: vec![],
+            session_details: vec![],
+        });
+
+        assert!(homepage.contains("Theme</p>"), "homepage: {homepage}");
+        assert!(homepage.contains("?theme=light"), "homepage: {homepage}");
+        assert!(
+            homepage.contains("data-theme=\"system\""),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("--console-bg: #f6f7fb;"),
+            "homepage: {homepage}"
+        );
+    }
+
+    #[test]
+    fn render_console_homepage_includes_light_inspector_and_timeline_refinements() {
+        let homepage = super::render_console_homepage(&ConsoleSnapshot {
+            summary: "PrismTrace host skeleton".into(),
+            bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
+            target_summaries: vec![],
+            activity_items: vec![],
+            request_summaries: vec![],
+            session_summaries: vec![super::ConsoleSessionSummary {
+                session_id: "session-1".into(),
+                pid: 701,
+                target_display_name: "Codex".into(),
+                started_at_ms: 10,
+                completed_at_ms: 25,
+                exchange_count: 1,
+                request_count: 1,
+                response_count: 1,
+            }],
+            request_details: vec![],
+            session_details: vec![super::ConsoleSessionDetail {
+                session_id: "session-1".into(),
+                pid: 701,
+                target_display_name: "Codex".into(),
+                started_at_ms: 10,
+                completed_at_ms: 25,
+                last_exchange_started_at_ms: 10,
+                exchange_count: 1,
+                timeline_items: vec![super::ConsoleSessionTimelineItem {
+                    request_id: "req-1".into(),
+                    exchange_id: Some("exchange-1".into()),
+                    pid: 701,
+                    provider: "openai".into(),
+                    model: Some("gpt-4.1".into()),
+                    started_at_ms: 10,
+                    completed_at_ms: 25,
+                    duration_ms: 15,
+                    target_display_name: "Codex".into(),
+                    request_summary: "openai POST /v1/responses".into(),
+                    response_status: Some(200),
+                    tool_count_final: 3,
+                    has_response: true,
+                    has_tool_visibility: true,
+                }],
+            }],
+        });
+
+        assert!(
+            homepage.contains("--console-code-bg: #edf2f8;"),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("class=\"console-detail-grid console-detail-grid-inspector\""),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("class=\"console-list console-timeline-list\""),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("class=\"console-list-item is-actionable console-timeline-item\""),
+            "homepage: {homepage}"
+        );
+    }
+
+    #[test]
+    fn render_console_homepage_uses_refined_request_stream_items() {
+        let homepage = super::render_console_homepage(&ConsoleSnapshot {
+            summary: "PrismTrace host skeleton".into(),
+            bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
+            target_summaries: vec![],
+            activity_items: vec![],
+            request_summaries: vec![super::ConsoleRequestSummary {
+                request_id: "req-1".into(),
+                captured_at_ms: 30,
+                provider: "openai".into(),
+                model: Some("gpt-4.1".into()),
+                target_display_name: "Codex".into(),
+                summary_text: "openai POST /v1/responses".into(),
+            }],
+            session_summaries: vec![],
+            request_details: vec![],
+            session_details: vec![],
+        });
+
+        assert!(
+            homepage.contains("class=\"console-list console-request-stream\""),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage
+                .contains("class=\"console-list-item is-actionable console-request-stream-item\""),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("class=\"console-request-stream-kicker\""),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("class=\"console-request-stream-main\""),
             "homepage: {homepage}"
         );
     }
@@ -3728,6 +4214,60 @@ mod tests {
         );
         assert!(
             homepage.contains("refreshRegion(\"/api/requests\""),
+            "homepage: {homepage}"
+        );
+    }
+
+    #[test]
+    fn render_console_homepage_limits_pointer_affordance_to_real_actions() {
+        let homepage = super::render_console_homepage(&ConsoleSnapshot {
+            summary: "PrismTrace host skeleton".into(),
+            bind_addr: "http://127.0.0.1:7799".into(),
+            filter_context: None,
+            target_summaries: vec![super::ConsoleTargetSummary {
+                pid: 701,
+                display_name: "Codex".into(),
+                runtime_kind: "node".into(),
+                attach_state: "idle".into(),
+                probe_state_summary: "probe: no active session".into(),
+            }],
+            activity_items: vec![],
+            request_summaries: vec![super::ConsoleRequestSummary {
+                request_id: "req-1".into(),
+                captured_at_ms: 30,
+                provider: "openai".into(),
+                model: Some("gpt-4.1".into()),
+                target_display_name: "Codex".into(),
+                summary_text: "openai POST /v1/responses".into(),
+            }],
+            session_summaries: vec![super::ConsoleSessionSummary {
+                session_id: "session-1".into(),
+                pid: 701,
+                target_display_name: "Codex".into(),
+                started_at_ms: 10,
+                completed_at_ms: 30,
+                exchange_count: 1,
+                request_count: 1,
+                response_count: 1,
+            }],
+            request_details: vec![],
+            session_details: vec![],
+        });
+
+        assert!(
+            !homepage.contains(".console-pill {\n        display: inline-flex;\n        align-items: center;\n        min-height: 24px;\n        padding: 0 10px;\n        border-radius: 999px;\n        border: 1px solid #31507c;\n        background: rgba(19, 35, 63, 0.72);\n        color: #cfe1ff;\n        font-size: 12px;\n        cursor: pointer;"),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("button.console-pill"),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("data-request-detail-trigger=\"req-1\""),
+            "homepage: {homepage}"
+        );
+        assert!(
+            homepage.contains("data-session-detail-trigger=\"session-1\""),
             "homepage: {homepage}"
         );
     }
@@ -4440,6 +4980,35 @@ mod tests {
             response.contains("Content-Type: image/x-icon"),
             "response: {response}"
         );
+
+        handle.join().expect("server thread should join")?;
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn console_server_returns_console_stylesheet() -> io::Result<()> {
+        let workspace_root = unique_test_dir();
+        let result = bootstrap(&workspace_root)?;
+        let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+        let addr = server
+            .local_url()?
+            .trim_start_matches("http://")
+            .to_string();
+
+        let handle = thread::spawn(move || server.serve_once());
+
+        let response = send_get_request(&addr, "/assets/console.css")?;
+
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK"),
+            "response: {response}"
+        );
+        assert!(
+            response.contains("Content-Type: text/css; charset=utf-8"),
+            "response: {response}"
+        );
+        assert!(response.contains("--console-bg:"), "response: {response}");
 
         handle.join().expect("server thread should join")?;
         fs::remove_dir_all(result.config.state_root)?;

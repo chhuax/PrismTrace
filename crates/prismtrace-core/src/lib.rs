@@ -50,6 +50,35 @@ pub struct ProcessSample {
 }
 
 impl ProcessSample {
+    fn is_packaged_node_cli(&self) -> bool {
+        let process_name = self.process_name.to_ascii_lowercase();
+        let executable_path = self.executable_path.to_string_lossy().to_ascii_lowercase();
+        let command_line = self
+            .command_line
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        (process_name == "opencode"
+            && (executable_path == "opencode"
+                || executable_path.ends_with("/.opencode/bin/opencode")))
+            || (executable_path.ends_with("/applications/codex.app/contents/resources/codex")
+                && command_line.contains(" app-server"))
+    }
+
+    fn is_packaged_electron_app(&self) -> bool {
+        let executable_path = self.executable_path.to_string_lossy().to_ascii_lowercase();
+        let command_line = self
+            .command_line
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        executable_path.contains(".app/contents/macos/")
+            && (command_line.contains(".app/contents/resources/app.asar")
+                || executable_path.ends_with("/applications/codex.app/contents/macos/codex"))
+    }
+
     fn first_script_argument<'a, I>(parts: &mut I) -> Option<&'a str>
     where
         I: Iterator<Item = &'a str>,
@@ -115,10 +144,11 @@ impl ProcessSample {
             .unwrap_or_default()
             .to_ascii_lowercase();
 
-        if process_name == "node" || executable_name == "node" {
+        if process_name == "node" || executable_name == "node" || self.is_packaged_node_cli() {
             RuntimeKind::Node
         } else if process_name == "electron"
             || executable_name == "electron"
+            || self.is_packaged_electron_app()
             || self
                 .executable_path
                 .to_string_lossy()
@@ -501,6 +531,57 @@ mod tests {
     }
 
     #[test]
+    fn process_sample_classifies_packaged_opencode_binary_as_node() {
+        let sample = ProcessSample {
+            pid: 8,
+            process_name: "opencode".into(),
+            executable_path: PathBuf::from("/Users/test/.opencode/bin/opencode"),
+            command_line: Some("/Users/test/.opencode/bin/opencode".into()),
+        };
+
+        assert_eq!(sample.runtime_kind(), RuntimeKind::Node);
+    }
+
+    #[test]
+    fn process_sample_classifies_bare_opencode_process_name_as_node() {
+        let sample = ProcessSample {
+            pid: 8,
+            process_name: "opencode".into(),
+            executable_path: PathBuf::from("opencode"),
+            command_line: Some("opencode".into()),
+        };
+
+        assert_eq!(sample.runtime_kind(), RuntimeKind::Node);
+    }
+
+    #[test]
+    fn process_sample_classifies_codex_main_app_as_electron() {
+        let sample = ProcessSample {
+            pid: 8,
+            process_name: "Codex".into(),
+            executable_path: PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex"),
+            command_line: Some("/Applications/Codex.app/Contents/MacOS/Codex".into()),
+        };
+
+        assert_eq!(sample.runtime_kind(), RuntimeKind::Electron);
+    }
+
+    #[test]
+    fn process_sample_classifies_codex_app_server_as_node() {
+        let sample = ProcessSample {
+            pid: 8,
+            process_name: "codex".into(),
+            executable_path: PathBuf::from("/Applications/Codex.app/Contents/Resources/codex"),
+            command_line: Some(
+                "/Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled"
+                    .into(),
+            ),
+        };
+
+        assert_eq!(sample.runtime_kind(), RuntimeKind::Node);
+    }
+
+    #[test]
     fn process_sample_keeps_unknown_when_no_runtime_matches() {
         let sample = ProcessSample {
             pid: 9,
@@ -569,7 +650,7 @@ mod tests {
             target.command_line,
             Some("/Applications/Codex.app/Contents/MacOS/Codex".into())
         );
-        assert_eq!(target.runtime_kind, RuntimeKind::Unknown);
+        assert_eq!(target.runtime_kind, RuntimeKind::Electron);
     }
 
     #[test]
