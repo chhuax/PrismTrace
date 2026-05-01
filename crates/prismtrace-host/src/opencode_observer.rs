@@ -12,6 +12,7 @@ const DEFAULT_OPENCODE_URL: &str = "http://127.0.0.1:4096";
 const DEFAULT_SESSION_LIMIT: usize = 3;
 const DEFAULT_MESSAGE_LIMIT: usize = 6;
 const DEFAULT_GLOBAL_EVENT_LIMIT: usize = 1;
+const OPENCODE_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpencodeObserverOptions {
@@ -33,6 +34,8 @@ impl Default for OpencodeObserverOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpencodeObserverSource {
     base_url: String,
+    session_limit: usize,
+    message_limit: usize,
 }
 
 impl ObserverSource for OpencodeObserverSource {
@@ -47,6 +50,8 @@ impl ObserverSource for OpencodeObserverSource {
     fn connect(&self) -> io::Result<Box<dyn ObserverSession>> {
         Ok(Box::new(OpencodeObserverSession::new(
             self.base_url.clone(),
+            self.session_limit,
+            self.message_limit,
         )))
     }
 }
@@ -61,6 +66,8 @@ impl ObserverSourceFactory<OpencodeObserverOptions> for OpencodeObserverFactory 
     ) -> io::Result<Vec<Box<dyn ObserverSource>>> {
         Ok(vec![Box::new(OpencodeObserverSource {
             base_url: request.base_url.clone(),
+            session_limit: request.session_limit,
+            message_limit: request.message_limit,
         })])
     }
 }
@@ -146,20 +153,31 @@ fn event_as_json(event: &ObservedEvent) -> Value {
 
 struct OpencodeObserverSession {
     base_url: String,
+    session_limit: usize,
+    message_limit: usize,
+    agent: ureq::Agent,
     pending: VecDeque<ObservedEvent>,
 }
 
 impl OpencodeObserverSession {
-    fn new(base_url: String) -> Self {
+    fn new(base_url: String, session_limit: usize, message_limit: usize) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
+            session_limit,
+            message_limit,
+            agent: ureq::AgentBuilder::new()
+                .timeout_connect(OPENCODE_REQUEST_TIMEOUT)
+                .timeout_read(OPENCODE_REQUEST_TIMEOUT)
+                .timeout_write(OPENCODE_REQUEST_TIMEOUT)
+                .timeout(OPENCODE_REQUEST_TIMEOUT)
+                .build(),
             pending: VecDeque::new(),
         }
     }
 
     fn get_json(&self, path: &str) -> io::Result<Value> {
         let url = format!("{}{}", self.base_url, path);
-        let response = ureq::get(&url).call().map_err(|error| {
+        let response = self.agent.get(&url).call().map_err(|error| {
             io::Error::other(format!(
                 "request to opencode observer endpoint failed: {error}"
             ))
@@ -171,13 +189,22 @@ impl OpencodeObserverSession {
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 
-    fn collect_message_events(&self, session_id: &str) -> io::Result<Vec<ObservedEvent>> {
+    fn collect_message_events(
+        &self,
+        session_id: &str,
+        event_limit: usize,
+    ) -> io::Result<Vec<ObservedEvent>> {
+        if event_limit == 0 {
+            return Ok(Vec::new());
+        }
+
         let payload = self.get_json(&format!("/session/{session_id}/message"))?;
         Ok(payload
             .as_array()
             .into_iter()
             .flatten()
             .flat_map(|message| normalize_message_parts(session_id, message))
+            .take(event_limit)
             .collect())
     }
 
@@ -234,7 +261,14 @@ impl ObserverSession for OpencodeObserverSession {
         let sessions = self.get_json("/session")?;
         let mut events = self.collect_source_capability_events();
 
-        for session in sessions.as_array().into_iter().flatten() {
+        let mut remaining_message_events = self.message_limit;
+
+        for session in sessions
+            .as_array()
+            .into_iter()
+            .flatten()
+            .take(self.session_limit)
+        {
             let session_event = normalize_session_event(session);
             let session_id = session_event
                 .thread_id
@@ -242,8 +276,16 @@ impl ObserverSession for OpencodeObserverSession {
                 .unwrap_or_else(|| "unknown-session".to_string());
             events.push(session_event);
 
-            match self.collect_message_events(&session_id) {
-                Ok(message_events) => events.extend(message_events),
+            if remaining_message_events == 0 {
+                continue;
+            }
+
+            match self.collect_message_events(&session_id, remaining_message_events) {
+                Ok(message_events) => {
+                    remaining_message_events =
+                        remaining_message_events.saturating_sub(message_events.len());
+                    events.extend(message_events);
+                }
                 Err(error) => events.push(ObservedEvent {
                     channel_kind: ObserverChannelKind::OpencodeServer,
                     event_kind: ObservedEventKind::Unknown,
@@ -692,12 +734,13 @@ mod tests {
     use super::{OpencodeObserverOptions, spawn_test_opencode_server, truncate};
     use prismtrace_sources::{
         ObservedEvent, ObservedEventKind, ObserverArtifactSource, ObserverArtifactWriter,
-        ObserverChannelKind, ObserverHandshake,
+        ObserverChannelKind, ObserverHandshake, ObserverSession,
     };
     use serde_json::json;
     use std::io;
     use std::path::PathBuf;
     use std::process;
+    use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -817,6 +860,47 @@ mod tests {
     }
 
     #[test]
+    fn collect_capability_events_applies_session_and_message_limits_before_fetching_more_messages()
+    -> io::Result<()> {
+        let requested_paths = Arc::new(Mutex::new(Vec::new()));
+        let base_url = spawn_multi_session_server(Arc::clone(&requested_paths))?;
+        let mut session = super::OpencodeObserverSession::new(base_url, 2, 1);
+
+        let events = ObserverSession::collect_capability_events(&mut session)?;
+
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.event_kind == ObservedEventKind::Thread)
+                .count(),
+            2
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.event_kind == ObservedEventKind::Item)
+                .count(),
+            1
+        );
+        let paths = requested_paths
+            .lock()
+            .expect("paths lock should be healthy");
+        assert!(
+            paths
+                .iter()
+                .any(|path| path == "/session/session-1/message")
+        );
+        assert!(
+            !paths
+                .iter()
+                .any(|path| path == "/session/session-2/message"),
+            "message_limit should stop fetching later session messages"
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn opencode_observer_artifact_writer_persists_handshake_and_event() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = crate::bootstrap(&workspace_root)?;
@@ -889,6 +973,81 @@ mod tests {
         assert!(String::from_utf8_lossy(&output).contains("opencode_observer_event"));
         std::fs::remove_dir_all(result.config.state_root)?;
         Ok(())
+    }
+
+    fn spawn_multi_session_server(requested_paths: Arc<Mutex<Vec<String>>>) -> io::Result<String> {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::{TcpListener, TcpStream};
+
+        fn response_body(path: &str) -> Option<&'static str> {
+            match path {
+                "/agent" => Some("[]"),
+                "/mcp" => Some("{}"),
+                "/provider" => Some(r#"{"all":[]}"#),
+                "/experimental/tool/ids" => Some("[]"),
+                "/session" => Some(
+                    r#"[
+                        {"id":"session-1","title":"one","directory":"/tmp/one","updated":2},
+                        {"id":"session-2","title":"two","directory":"/tmp/two","updated":1},
+                        {"id":"session-3","title":"three","directory":"/tmp/three","updated":0}
+                    ]"#,
+                ),
+                "/session/session-1/message" => Some(
+                    r#"[
+                        {"info":{"role":"user","id":"turn-1","time":{"created":1}},"parts":[{"id":"part-1","type":"text","text":"hello"}]},
+                        {"info":{"role":"assistant","id":"turn-2","time":{"created":2}},"parts":[{"id":"part-2","type":"text","text":"world"}]}
+                    ]"#,
+                ),
+                "/session/session-2/message" => Some(
+                    r#"[{"info":{"role":"user","id":"turn-3"},"parts":[{"id":"part-3","type":"text","text":"should-not-fetch"}]}]"#,
+                ),
+                _ => None,
+            }
+        }
+
+        fn write_response(mut stream: TcpStream, status: &str, body: &str) -> io::Result<()> {
+            write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )?;
+            stream.flush()
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let base_url = format!("http://{}", listener.local_addr()?);
+        std::thread::spawn(move || -> io::Result<()> {
+            for _ in 0..7 {
+                let (stream, _) = listener.accept()?;
+                let mut reader = BufReader::new(stream.try_clone()?);
+                let mut request_line = String::new();
+                reader.read_line(&mut request_line)?;
+                let path = request_line.split_whitespace().nth(1).unwrap_or("/");
+                requested_paths
+                    .lock()
+                    .expect("paths lock should be healthy")
+                    .push(path.to_string());
+
+                loop {
+                    let mut header_line = String::new();
+                    reader.read_line(&mut header_line)?;
+                    if header_line == "\r\n" || header_line.is_empty() {
+                        break;
+                    }
+                }
+
+                if let Some(body) = response_body(path) {
+                    write_response(stream, "200 OK", body)?;
+                } else {
+                    write_response(stream, "404 Not Found", r#"{"error":"not found"}"#)?;
+                }
+            }
+
+            Ok(())
+        });
+
+        Ok(base_url)
     }
 
     fn unique_test_dir() -> PathBuf {

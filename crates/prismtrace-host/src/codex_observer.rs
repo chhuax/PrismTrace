@@ -349,7 +349,7 @@ pub fn discover_latest_codex_socket(temp_dir: Option<&Path>) -> io::Result<Optio
         sockets.push((entry.path(), modified));
     }
 
-    sockets.sort_by(|left, right| right.1.cmp(&left.1));
+    sockets.sort_by_key(|(_, modified)| std::cmp::Reverse(*modified));
 
     if !enforce_desktop_owner {
         return Ok(sockets.into_iter().map(|(path, _)| path).next());
