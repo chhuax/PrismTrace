@@ -105,12 +105,19 @@ fn handle_console_connection(
 ) -> io::Result<()> {
     match write_live_console_response(&mut stream, result, bind_addr, filter) {
         Ok(()) => Ok(()),
-        Err(error) if is_connection_timeout(&error) => write_console_json_error_response(
-            &mut stream,
-            "HTTP/1.1 408 Request Timeout",
-            "request_timeout",
-            "request was not received before the console connection timeout",
-        ),
+        Err(error) if is_connection_timeout(&error) => {
+            match write_console_json_error_response(
+                &mut stream,
+                "HTTP/1.1 408 Request Timeout",
+                "request_timeout",
+                "request was not received before the console connection timeout",
+            ) {
+                Ok(()) => Ok(()),
+                Err(error) if is_disconnected_client(&error) => Ok(()),
+                Err(error) => Err(error),
+            }
+        }
+        Err(error) if is_disconnected_client(&error) => Ok(()),
         Err(error) => Err(error),
     }
 }
@@ -119,6 +126,15 @@ fn is_connection_timeout(error: &io::Error) -> bool {
     matches!(
         error.kind(),
         io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    )
+}
+
+fn is_disconnected_client(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::BrokenPipe
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
     )
 }
 
