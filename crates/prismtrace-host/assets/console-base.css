@@ -1,0 +1,83 @@
+body {
+  font-family: "Inter", sans-serif;
+}
+
+.font-mono {
+  font-family: "JetBrains Mono", monospace;
+}
+
+.machined-border-b {
+  border-bottom: 1px solid rgba(63, 72, 90, 0.3);
+}
+
+.machined-border-r {
+  border-right: 1px solid rgba(63, 72, 90, 0.3);
+}
+
+.machined-border-l {
+  border-left: 1px solid rgba(63, 72, 90, 0.3);
+}
+
+.well-shadow {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+.console-app {
+  min-height: 100vh;
+}
+
+.console-topbar {
+  backdrop-filter: blur(20px);
+}
+
+.console-sidebar {
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.console-main {
+  transition: background-color 160ms ease;
+}
+
+.console-canvas {
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.console-rightbar {
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.console-nav-button {
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.console-nav-button.is-active {
+  border-left-width: 2px;
+}
+
+.console-theme-segment,
+.console-language-segment {
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.theme-button-active {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+}
+
+.console-app input,
+.console-app textarea {
+  color: inherit;
+}
+
+.console-app input::placeholder,
+.console-app textarea::placeholder {
+  color: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+body.console-app[data-theme="dark"] input,
+body.console-app[data-theme="dark"] textarea {
+  background-color: #0d0e13 !important;
+}
+
+body.console-app[data-theme="dark"] input[type="checkbox"] {
+  background-color: #0d0e13 !important;
+}

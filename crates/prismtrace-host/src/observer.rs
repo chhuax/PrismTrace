@@ -5,6 +5,7 @@ use std::time::Duration;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObserverChannelKind {
     CodexAppServer,
+    ClaudeCodeTranscript,
     OpencodeServer,
 }
 
@@ -12,6 +13,7 @@ impl ObserverChannelKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::CodexAppServer => "codex-app-server",
+            Self::ClaudeCodeTranscript => "claude-code",
             Self::OpencodeServer => "opencode-server",
         }
     }
@@ -25,6 +27,10 @@ pub enum ObservedEventKind {
     Tool,
     Approval,
     Hook,
+    Agent,
+    Command,
+    Mcp,
+    Provider,
     Plugin,
     Skill,
     App,
@@ -40,6 +46,10 @@ impl ObservedEventKind {
             Self::Tool => "tool",
             Self::Approval => "approval",
             Self::Hook => "hook",
+            Self::Agent => "agent",
+            Self::Command => "command",
+            Self::Mcp => "mcp",
+            Self::Provider => "provider",
             Self::Plugin => "plugin",
             Self::Skill => "skill",
             Self::App => "app",
@@ -100,6 +110,10 @@ mod tests {
             "codex-app-server"
         );
         assert_eq!(
+            ObserverChannelKind::ClaudeCodeTranscript.label(),
+            "claude-code"
+        );
+        assert_eq!(
             ObserverChannelKind::OpencodeServer.label(),
             "opencode-server"
         );
@@ -113,6 +127,10 @@ mod tests {
         assert_eq!(ObservedEventKind::Tool.label(), "tool");
         assert_eq!(ObservedEventKind::Approval.label(), "approval");
         assert_eq!(ObservedEventKind::Hook.label(), "hook");
+        assert_eq!(ObservedEventKind::Agent.label(), "agent");
+        assert_eq!(ObservedEventKind::Command.label(), "command");
+        assert_eq!(ObservedEventKind::Mcp.label(), "mcp");
+        assert_eq!(ObservedEventKind::Provider.label(), "provider");
         assert_eq!(ObservedEventKind::Plugin.label(), "plugin");
         assert_eq!(ObservedEventKind::Skill.label(), "skill");
         assert_eq!(ObservedEventKind::App.label(), "app");

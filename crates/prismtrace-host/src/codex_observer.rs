@@ -1,3 +1,4 @@
+use crate::ingest::{ObserverArtifactSource, ObserverArtifactWriter};
 use crate::observer::{
     ObservedEvent, ObservedEventKind, ObserverChannelKind, ObserverHandshake, ObserverSession,
     ObserverSource, ObserverSourceFactory,
@@ -13,12 +14,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 pub const CODEX_APP_SERVER_BIN: &str = "/Applications/Codex.app/Contents/Resources/codex";
 const DEFAULT_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_millis(750);
 const DEFAULT_MAX_EVENTS: usize = 12;
+const CODEX_MCP_STATUS_METHOD: &str = "mcpServer/listStatus";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodexObserverOptions {
@@ -137,7 +139,11 @@ pub fn run_codex_observer(
         match source.connect() {
             Ok(mut session) => match session.initialize() {
                 Ok(handshake) => {
-                    let artifact_writer = CodexObserverArtifactWriter::create(storage, &handshake)?;
+                    let artifact_writer = ObserverArtifactWriter::create(
+                        storage,
+                        ObserverArtifactSource::Codex,
+                        &handshake,
+                    )?;
                     writeln!(
                         output,
                         "{}",
@@ -214,71 +220,6 @@ fn event_as_json(event: &ObservedEvent) -> Value {
         "timestamp": event.timestamp,
         "raw": event.raw_json,
     })
-}
-
-struct CodexObserverArtifactWriter {
-    artifact_path: PathBuf,
-}
-
-impl CodexObserverArtifactWriter {
-    fn create(storage: &StorageLayout, handshake: &ObserverHandshake) -> io::Result<Self> {
-        let observer_dir = storage.artifacts_dir.join("observer_events").join("codex");
-        fs::create_dir_all(&observer_dir)?;
-
-        let started_at_ms = current_time_ms()?;
-        let artifact_path =
-            observer_dir.join(format!("{started_at_ms}-{}.jsonl", std::process::id()));
-        let writer = Self { artifact_path };
-        writer.append_json_line(&json!({
-            "record_type": "handshake",
-            "channel": handshake.channel_kind.label(),
-            "transport": handshake.transport_label,
-            "server_label": handshake.server_label,
-            "recorded_at_ms": started_at_ms,
-            "raw_json": handshake.raw_json,
-        }))?;
-
-        Ok(writer)
-    }
-
-    fn append_event(&self, event: &ObservedEvent) -> io::Result<()> {
-        self.append_json_line(&json!({
-            "record_type": "event",
-            "channel": event.channel_kind.label(),
-            "event_kind": event.event_kind.label(),
-            "summary": event.summary,
-            "method": event.method,
-            "thread_id": event.thread_id,
-            "turn_id": event.turn_id,
-            "item_id": event.item_id,
-            "timestamp": event.timestamp,
-            "recorded_at_ms": current_time_ms()?,
-            "raw_json": event.raw_json,
-        }))
-    }
-
-    #[cfg(test)]
-    fn artifact_path(&self) -> &Path {
-        &self.artifact_path
-    }
-
-    fn append_json_line(&self, value: &Value) -> io::Result<()> {
-        let mut artifact = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.artifact_path)?;
-        serde_json::to_writer(&mut artifact, value)?;
-        artifact.write_all(b"\n")?;
-        artifact.flush()?;
-        Ok(())
-    }
-}
-
-fn current_time_ms() -> io::Result<u64> {
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(io::Error::other)?;
-    Ok(duration.as_millis() as u64)
 }
 
 fn validate_proxy_socket_endpoint(socket_path: &Path, timeout: Duration) -> io::Result<()> {
@@ -674,6 +615,7 @@ impl ObserverSession for CodexObserverSession {
 
         let requests = [
             ("skills/list", json!({}), ObservedEventKind::Skill),
+            (CODEX_MCP_STATUS_METHOD, json!({}), ObservedEventKind::Mcp),
             ("plugin/list", json!({}), ObservedEventKind::Plugin),
             ("app/list", json!({ "limit": 10 }), ObservedEventKind::App),
         ];
@@ -774,6 +716,10 @@ fn capability_event_from_response(
                     .sum::<usize>()
             })
             .unwrap_or(0),
+        CODEX_MCP_STATUS_METHOD => {
+            let result = value.get("result").unwrap_or(&value);
+            mcp_server_names_from_value(result).len()
+        }
         "plugin/list" => value
             .get("result")
             .and_then(|result| result.get("marketplaces"))
@@ -881,6 +827,19 @@ fn summarize_capability_payload(method: &str, value: &Value) -> Value {
                 "skill_names_preview": skill_names,
             })
         }
+        CODEX_MCP_STATUS_METHOD => {
+            let result = value.get("result").unwrap_or(value);
+            let mcp_server_names = mcp_server_names_from_value(result)
+                .into_iter()
+                .take(20)
+                .collect::<Vec<_>>();
+
+            json!({
+                "method": method,
+                "mcp_server_count": mcp_server_names.len(),
+                "mcp_server_names_preview": mcp_server_names,
+            })
+        }
         "plugin/list" => {
             let marketplaces = value
                 .get("result")
@@ -928,7 +887,10 @@ fn summarize_capability_payload(method: &str, value: &Value) -> Value {
 }
 
 fn summarize_notification_payload(method: &str, value: &Value) -> Value {
-    if method.starts_with("skills/") || method.starts_with("plugin/") || method.starts_with("app/")
+    if method.starts_with("skills/")
+        || method.starts_with("plugin/")
+        || method.starts_with("app/")
+        || method.starts_with("mcpServer/")
     {
         json!({
             "method": method,
@@ -936,6 +898,75 @@ fn summarize_notification_payload(method: &str, value: &Value) -> Value {
         })
     } else {
         value.clone()
+    }
+}
+
+fn mcp_server_names_from_value(value: &Value) -> Vec<String> {
+    let mut names = Vec::new();
+    collect_mcp_server_names(value, &mut names);
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn collect_mcp_server_names(value: &Value, names: &mut Vec<String>) {
+    match value {
+        Value::Object(object) => {
+            if let Some(name) = [
+                "name",
+                "id",
+                "server",
+                "server_name",
+                "serverName",
+                "connector_name",
+                "connectorName",
+            ]
+            .into_iter()
+            .find_map(|key| object.get(key).and_then(Value::as_str))
+            {
+                push_mcp_server_name(names, name);
+            }
+
+            for key in [
+                "mcpServers",
+                "servers",
+                "statuses",
+                "data",
+                "all",
+                "auth_statuses",
+                "authStatuses",
+            ] {
+                if let Some(child) = object.get(key) {
+                    collect_mcp_server_names_from_collection(child, names);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_mcp_server_names(item, names);
+            }
+        }
+        Value::String(name) => push_mcp_server_name(names, name),
+        _ => {}
+    }
+}
+
+fn collect_mcp_server_names_from_collection(value: &Value, names: &mut Vec<String>) {
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object {
+                push_mcp_server_name(names, key);
+                collect_mcp_server_names(child, names);
+            }
+        }
+        _ => collect_mcp_server_names(value, names),
+    }
+}
+
+fn push_mcp_server_name(names: &mut Vec<String>, name: &str) {
+    let trimmed = name.trim();
+    if !trimmed.is_empty() {
+        names.push(trimmed.to_string());
     }
 }
 
@@ -959,6 +990,8 @@ fn observed_event_kind_for_method(method: &str) -> ObservedEventKind {
         ObservedEventKind::Thread
     } else if method.starts_with("turn/") {
         ObservedEventKind::Turn
+    } else if method.starts_with("item/mcpToolCall/") {
+        ObservedEventKind::Tool
     } else if method.starts_with("item/") {
         ObservedEventKind::Item
     } else if method.starts_with("hook/") {
@@ -969,6 +1002,17 @@ fn observed_event_kind_for_method(method: &str) -> ObservedEventKind {
         ObservedEventKind::Skill
     } else if method.starts_with("app/") {
         ObservedEventKind::App
+    } else if method == "codex/event/mcp_list_tools_response"
+        || method == "codex/event/mcp_startup_update"
+        || method == "codex/event/mcp_startup_complete"
+        || method.starts_with("mcpServer/")
+    {
+        ObservedEventKind::Mcp
+    } else if method == "codex/event/mcp_tool_call_begin"
+        || method == "codex/event/mcp_tool_call_end"
+        || method.starts_with("item/mcpToolCall/")
+    {
+        ObservedEventKind::Tool
     } else if method.contains("approval") || method.contains("permission") {
         ObservedEventKind::Approval
     } else if method.contains("tool")
@@ -989,6 +1033,7 @@ mod tests {
         discover_latest_codex_socket, normalize_server_value, observed_event_kind_for_method,
         select_latest_desktop_codex_socket,
     };
+    use crate::ingest::{ObserverArtifactSource, ObserverArtifactWriter};
     use crate::observer::{
         ObservedEvent, ObserverChannelKind, ObserverHandshake, ObserverSourceFactory,
     };
@@ -1134,6 +1179,18 @@ mod tests {
             observed_event_kind_for_method("server_request/resolved"),
             ObservedEventKind::Tool
         );
+        assert_eq!(
+            observed_event_kind_for_method("mcpServer/startupStatus/updated"),
+            ObservedEventKind::Mcp
+        );
+        assert_eq!(
+            observed_event_kind_for_method("codex/event/mcp_list_tools_response"),
+            ObservedEventKind::Mcp
+        );
+        assert_eq!(
+            observed_event_kind_for_method("item/mcpToolCall/progress"),
+            ObservedEventKind::Tool
+        );
     }
 
     #[test]
@@ -1154,6 +1211,32 @@ mod tests {
 
         assert_eq!(event.event_kind, ObservedEventKind::Skill);
         assert!(event.summary.contains("3 entries"));
+    }
+
+    #[test]
+    fn capability_event_from_response_counts_codex_mcp_servers() {
+        let event = capability_event_from_response(
+            super::CODEX_MCP_STATUS_METHOD,
+            ObservedEventKind::Mcp,
+            json!({
+                "id": 3,
+                "result": {
+                    "servers": [
+                        { "name": "github", "status": "ready" }
+                    ],
+                    "auth_statuses": {
+                        "linear": { "status": "needs_auth" }
+                    }
+                }
+            }),
+        );
+
+        assert_eq!(event.event_kind, ObservedEventKind::Mcp);
+        assert!(event.summary.contains("2 entries"));
+        assert_eq!(
+            event.raw_json["mcp_server_names_preview"],
+            json!(["github", "linear"])
+        );
     }
 
     #[test]
@@ -1292,11 +1375,17 @@ mod tests {
             json!({
                 "id": 3,
                 "result": {
-                    "marketplaces": []
+                    "servers": []
                 }
             }),
             json!({
                 "id": 4,
+                "result": {
+                    "marketplaces": []
+                }
+            }),
+            json!({
+                "id": 5,
                 "result": {
                     "data": []
                 }
@@ -1305,10 +1394,15 @@ mod tests {
 
         let events = crate::observer::ObserverSession::collect_capability_events(&mut session)?;
 
-        assert_eq!(events.len(), 3);
+        assert_eq!(events.len(), 4);
         assert_eq!(events[0].event_kind, ObservedEventKind::Unknown);
         assert_eq!(events[0].method.as_deref(), Some("skills/list"));
         assert!(events[0].summary.contains("skills/list disabled"));
+        assert_eq!(events[1].event_kind, ObservedEventKind::Mcp);
+        assert_eq!(
+            events[1].method.as_deref(),
+            Some(super::CODEX_MCP_STATUS_METHOD)
+        );
         Ok(())
     }
 
@@ -1334,8 +1428,9 @@ mod tests {
         let storage = StorageLayout::new(&root);
         storage.initialize()?;
 
-        let writer = super::CodexObserverArtifactWriter::create(
+        let writer = ObserverArtifactWriter::create(
             &storage,
+            ObserverArtifactSource::Codex,
             &ObserverHandshake {
                 channel_kind: ObserverChannelKind::CodexAppServer,
                 transport_label: "proxy-socket (/tmp/codex.sock)".into(),

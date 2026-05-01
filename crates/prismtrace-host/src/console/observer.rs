@@ -1,31 +1,18 @@
-use super::{
-    ConsoleActivityItem, ConsoleFilterContext, ConsoleRequestSummary, ConsoleSessionSummary,
-    ConsoleTargetFilterConfig, ConsoleTargetSummary, append_filter_context_fields,
-};
+use super::{ConsoleActivityItem, ConsoleTargetFilterConfig, ConsoleTargetSummary};
 use prismtrace_storage::StorageLayout;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
-use std::io;
-use std::io::BufRead;
-use std::path::{Path, PathBuf};
+use std::io::{self, BufRead};
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 struct ObserverArtifactEventRecord {
     event_id: String,
-    session_id: String,
-    channel: String,
-    source_label: String,
     event_kind: String,
     summary: String,
-    method: Option<String>,
-    thread_id: Option<String>,
-    turn_id: Option<String>,
-    item_id: Option<String>,
-    timestamp: Option<String>,
     occurred_at_ms: u64,
-    artifact_path: PathBuf,
-    raw_json: Value,
+    source_label: String,
 }
 
 #[derive(Debug, Clone)]
@@ -33,11 +20,7 @@ struct ObserverArtifactSessionRecord {
     session_id: String,
     channel: String,
     source_label: String,
-    transport: Option<String>,
-    server_label: Option<String>,
-    started_at_ms: u64,
     completed_at_ms: u64,
-    artifact_path: PathBuf,
     events: Vec<ObserverArtifactEventRecord>,
 }
 
@@ -132,19 +115,22 @@ fn read_observer_session(
     let session_id = format!("observer:{channel_dir}:{session_stem}");
 
     let mut channel = channel_dir.to_string();
-    let mut transport = None;
     let mut server_label = None;
     let mut started_at_ms = 0_u64;
     let mut completed_at_ms = 0_u64;
     let mut events = Vec::new();
 
     for (index, line) in reader.lines().enumerate() {
-        let line = line.ok()?;
+        let Ok(line) = line else {
+            continue;
+        };
         if line.trim().is_empty() {
             continue;
         }
 
-        let value: Value = serde_json::from_str(&line).ok()?;
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         match value.get("record_type").and_then(Value::as_str) {
             Some("handshake") => {
                 channel = value
@@ -152,10 +138,6 @@ fn read_observer_session(
                     .and_then(Value::as_str)
                     .unwrap_or(channel_dir)
                     .to_string();
-                transport = value
-                    .get("transport")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
                 server_label = value
                     .get("server_label")
                     .and_then(Value::as_str)
@@ -182,26 +164,18 @@ fn read_observer_session(
                     .and_then(Value::as_str)
                     .unwrap_or("observer event")
                     .to_string();
-                let method = value
-                    .get("method")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
                 let thread_id = value
                     .get("thread_id")
                     .and_then(Value::as_str)
-                    .map(ToString::to_string);
+                    .unwrap_or_default();
                 let turn_id = value
                     .get("turn_id")
                     .and_then(Value::as_str)
-                    .map(ToString::to_string);
+                    .unwrap_or_default();
                 let item_id = value
                     .get("item_id")
                     .and_then(Value::as_str)
-                    .map(ToString::to_string);
-                let timestamp = value
-                    .get("timestamp")
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string);
+                    .unwrap_or_default();
                 let occurred_at_ms = value
                     .get("recorded_at_ms")
                     .and_then(Value::as_u64)
@@ -217,9 +191,9 @@ fn read_observer_session(
                         &event_channel,
                         &event_kind,
                         &summary,
-                        thread_id.as_deref().unwrap_or_default(),
-                        turn_id.as_deref().unwrap_or_default(),
-                        item_id.as_deref().unwrap_or_default(),
+                        thread_id,
+                        turn_id,
+                        item_id,
                     ],
                 ) {
                     continue;
@@ -227,19 +201,10 @@ fn read_observer_session(
 
                 events.push(ObserverArtifactEventRecord {
                     event_id: format!("{session_id}:{index}"),
-                    session_id: session_id.clone(),
-                    channel: event_channel,
-                    source_label: current_source_label,
                     event_kind,
                     summary,
-                    method,
-                    thread_id,
-                    turn_id,
-                    item_id,
-                    timestamp,
                     occurred_at_ms,
-                    artifact_path: path.to_path_buf(),
-                    raw_json: value.get("raw_json").cloned().unwrap_or(Value::Null),
+                    source_label: current_source_label,
                 });
             }
             _ => {}
@@ -250,15 +215,14 @@ fn read_observer_session(
         return None;
     }
 
-    if started_at_ms == 0 {
-        started_at_ms = events
-            .iter()
-            .map(|event| event.occurred_at_ms)
-            .min()
-            .unwrap_or_default();
-    }
     if completed_at_ms == 0 {
-        completed_at_ms = started_at_ms;
+        completed_at_ms = started_at_ms.max(
+            events
+                .iter()
+                .map(|event| event.occurred_at_ms)
+                .max()
+                .unwrap_or_default(),
+        );
     }
     let source_label = observer_source_display_name(&channel, server_label.as_deref());
 
@@ -266,11 +230,7 @@ fn read_observer_session(
         session_id,
         channel,
         source_label,
-        transport,
-        server_label,
-        started_at_ms,
         completed_at_ms,
-        artifact_path: path.to_path_buf(),
         events,
     })
 }
@@ -293,17 +253,19 @@ pub(crate) fn load_observer_target_summaries(
 
     grouped
         .into_iter()
-        .map(|(display_name, (channel, session_count, event_count, last_seen_at_ms))| {
-            ConsoleTargetSummary {
-                pid: 0,
-                display_name,
-                runtime_kind: "observer".into(),
-                source_state: "active".into(),
-                source_summary: format!(
-                    "official observer · channel: {channel} · sessions: {session_count} · events: {event_count} · last seen: {last_seen_at_ms}"
-                ),
-            }
-        })
+        .map(
+            |(display_name, (channel, session_count, event_count, last_seen_at_ms))| {
+                ConsoleTargetSummary {
+                    pid: 0,
+                    display_name,
+                    runtime_kind: "observer".into(),
+                    source_state: "active".into(),
+                    source_summary: format!(
+                        "official observer · channel: {channel} · sessions: {session_count} · events: {event_count} · last seen: {last_seen_at_ms}"
+                    ),
+                }
+            },
+        )
         .collect()
 }
 
@@ -332,153 +294,4 @@ pub(crate) fn load_observer_activity_items(
                 })
         })
         .collect()
-}
-
-pub(crate) fn load_observer_request_summaries(
-    storage: &StorageLayout,
-    filter: Option<&ConsoleTargetFilterConfig>,
-) -> Vec<ConsoleRequestSummary> {
-    let mut requests = load_observer_sessions(storage, filter)
-        .into_iter()
-        .flat_map(|session| session.events.into_iter())
-        .map(|event| ConsoleRequestSummary {
-            request_id: event.event_id,
-            captured_at_ms: event.occurred_at_ms,
-            provider: event.channel,
-            model: Some(event.event_kind),
-            target_display_name: event.source_label,
-            summary_text: event.summary,
-        })
-        .collect::<Vec<_>>();
-    super::sort_request_summaries(&mut requests);
-    requests
-}
-
-pub(crate) fn load_observer_session_summaries(
-    storage: &StorageLayout,
-    filter: Option<&ConsoleTargetFilterConfig>,
-) -> Vec<ConsoleSessionSummary> {
-    let mut sessions = load_observer_sessions(storage, filter)
-        .into_iter()
-        .map(|session| {
-            let tool_events = session
-                .events
-                .iter()
-                .filter(|event| event.event_kind == "tool")
-                .count();
-            ConsoleSessionSummary {
-                session_id: session.session_id,
-                pid: 0,
-                target_display_name: session.source_label,
-                started_at_ms: session.started_at_ms,
-                completed_at_ms: session.completed_at_ms,
-                exchange_count: session.events.len(),
-                request_count: session.events.len(),
-                response_count: tool_events,
-            }
-        })
-        .collect::<Vec<_>>();
-    super::sort_session_summaries(&mut sessions);
-    sessions
-}
-
-pub(crate) fn load_observer_request_detail_payload(
-    storage: &StorageLayout,
-    request_id: &str,
-    filter: Option<&ConsoleTargetFilterConfig>,
-    filter_context: Option<&ConsoleFilterContext>,
-) -> Option<String> {
-    let event = load_observer_sessions(storage, filter)
-        .into_iter()
-        .flat_map(|session| session.events.into_iter())
-        .find(|event| event.event_id == request_id)?;
-
-    let raw_json_pretty = serde_json::to_string_pretty(&event.raw_json).ok()?;
-    let probe_context = format!(
-        "thread={} · turn={} · item={} · timestamp={}",
-        event.thread_id.as_deref().unwrap_or("n/a"),
-        event.turn_id.as_deref().unwrap_or("n/a"),
-        event.item_id.as_deref().unwrap_or("n/a"),
-        event.timestamp.as_deref().unwrap_or("n/a")
-    );
-    let mut payload = json!({
-        "request": {
-            "detail_kind": "observer_event",
-            "request_id": event.event_id,
-            "exchange_id": event.turn_id,
-            "captured_at_ms": event.occurred_at_ms,
-            "provider": event.channel,
-            "model": event.event_kind,
-            "target_display_name": event.source_label,
-            "artifact_path": event.artifact_path.display().to_string(),
-            "request_summary": event.summary,
-            "hook_name": event.session_id,
-            "method": event.method.unwrap_or_else(|| "observer-event".into()),
-            "url": format!("observer://{}", event.channel),
-            "headers": [],
-            "body_text": raw_json_pretty,
-            "body_size_bytes": raw_json_pretty.len(),
-            "truncated": false,
-            "probe_context": probe_context,
-            "thread_id": event.thread_id,
-            "turn_id": event.turn_id,
-            "item_id": event.item_id,
-            "timestamp": event.timestamp,
-            "tool_visibility": Value::Null,
-            "response": Value::Null,
-        }
-    });
-    append_filter_context_fields(&mut payload, filter_context);
-    Some(payload.to_string())
-}
-
-pub(crate) fn load_observer_session_detail_payload(
-    storage: &StorageLayout,
-    session_id: &str,
-    filter: Option<&ConsoleTargetFilterConfig>,
-    filter_context: Option<&ConsoleFilterContext>,
-) -> Option<String> {
-    let session = load_observer_sessions(storage, filter)
-        .into_iter()
-        .find(|session| session.session_id == session_id)?;
-    let timeline_items = session
-        .events
-        .iter()
-        .map(|event| {
-            json!({
-                "request_id": event.event_id,
-                "exchange_id": event.turn_id,
-                "pid": 0,
-                "target_display_name": event.source_label,
-                "provider": event.channel,
-                "model": event.event_kind,
-                "started_at_ms": event.occurred_at_ms,
-                "completed_at_ms": event.occurred_at_ms,
-                "duration_ms": 0,
-                "request_summary": event.summary,
-                "response_status": "observed",
-                "tool_count_final": if event.event_kind == "tool" { 1 } else { 0 },
-                "has_response": false,
-                "has_tool_visibility": event.event_kind == "tool",
-            })
-        })
-        .collect::<Vec<_>>();
-
-    let mut payload = json!({
-        "session": {
-            "detail_kind": "observer_session",
-            "session_id": session.session_id,
-            "pid": 0,
-            "target_display_name": session.source_label,
-            "started_at_ms": session.started_at_ms,
-            "completed_at_ms": session.completed_at_ms,
-            "exchange_count": timeline_items.len(),
-            "timeline_items": timeline_items,
-            "artifact_path": session.artifact_path.display().to_string(),
-            "transport": session.transport,
-            "server_label": session.server_label,
-        }
-    });
-    append_filter_context_fields(&mut payload, filter_context);
-    Some(payload.to_string())
 }

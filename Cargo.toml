@@ -1,6 +1,9 @@
 [workspace]
 members = [
     "crates/prismtrace-core",
+    "crates/prismtrace-analysis",
+    "crates/prismtrace-api",
+    "crates/prismtrace-index",
     "crates/prismtrace-storage",
     "crates/prismtrace-host",
 ]

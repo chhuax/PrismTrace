@@ -20,7 +20,7 @@
   - 验证：story 与 change 文档明确 `Codex` 不复用 `AttachController`
 
 - [x] A.2 固定第一版事件面
-  - 验证：明确只收 `thread / turn / item / tool / approval / hook / plugin / skill / app`
+  - 验证：明确只收 `thread / turn / item / tool / approval / hook / mcp / plugin / skill / app`
 
 - [x] A.3 固定第一版产品入口
   - 验证：明确先做 CLI/host 验证入口，不直接扩散到控制台
@@ -144,3 +144,63 @@
 ## 7. 当前建议
 
 当前这一轮已经把 `Codex` 从“CLI 主干已通”推进到了“artifact、控制台、live 验证和本地 CI 基线都已打通”。下一步如果继续深挖，重点应转到协议层补测和 `proxy socket` 直连稳定性，而不是重新回到 attach 路线。
+
+## 8. Console 页面收口执行清单
+
+下面这组 TODO 是当前控制台页面收口的直接执行队列。进入实现后应连续往下推，不在每完成 1-2 项后停下等待确认。
+
+### TODO-5：重建页面状态机
+
+- [ ] 让左侧一级导航切换真正驱动“中间主画布页面”
+  - 验证：`Sources / Activity / Sessions` 切换时，中间主画布发生对应页面切换，而不是只在左侧展开内容
+- [ ] 让右侧只承担 inspector / timeline / health 辅助角色
+  - 验证：右侧不再承载主内容页面，切换不会把主体内容挤到侧栏
+
+### TODO-6：补齐中间主画布页面
+
+- [ ] 落实 `Events Empty State`
+  - 验证：无事件时，中间主画布显示设计稿空态
+- [ ] 落实 `No Selection Guidance State`
+  - 验证：需要先选对象时，中间主画布显示引导态
+- [ ] 落实 `Timeline No-Selection State`
+  - 验证：切到 `Sessions` 且未选中 session 时，中间主画布显示 “No Session Selected”
+- [ ] 落实 `Session Timeline Drilldown`
+  - 验证：选中 session 后，中间主画布切到 session event stream
+- [ ] 落实 `Sources Unavailable State`
+  - 验证：source 断开或异常时，中间主画布显示 unavailable 页面
+
+### TODO-7：补齐右侧状态页
+
+- [ ] 落实 `Inspector No-Selection State`
+  - 验证：未选中 event 时，右侧显示空态说明
+- [ ] 落实 `Inspector Event Detail State`
+  - 验证：选中 event 后，右侧显示 detail，而中间主画布保持当前页面
+- [ ] 落实 `Timeline` 辅助态
+  - 验证：右侧 timeline 在无 session / 无 selection / 有 selection 三态下行为清晰
+
+### TODO-8：补齐首页壳层能力
+
+- [ ] 固化双语词汇表
+  - 验证：导航词、区域词、状态词、动作词、事件种类词都已有稳定的中英映射
+- [ ] 落实全局 `Theme` 切换
+  - 验证：首页可以在深色 / 浅色总览稿之间切换，主题切换不仅变按钮状态，还真正驱动页面视觉
+- [ ] 落实全局 `Language` 切换
+  - 验证：首页控件可以在中文 / 英文间切换，至少覆盖首页壳层文案与主要状态页标题
+- [ ] 对齐 `Inspector Event Detail` 的明暗版语义
+  - 验证：右侧 detail 态在深色 / 浅色主题下都能保持同一信息结构
+
+### TODO-9：把数据接线映射到状态页
+
+- [ ] 建立 source 状态到页面态的映射
+  - 例如：`active -> overview`、`no events -> events empty`、`unavailable -> source unavailable`
+- [ ] 建立 session 选择到页面态的映射
+  - 例如：`sessions nav + no selection -> timeline no-selection`、`session selected -> drilldown`
+- [ ] 建立 event 选择到右侧态的映射
+  - 例如：`no event selected -> inspector empty`、`event selected -> inspector detail`
+
+### TODO-10：持续推进约束
+
+- [ ] 实现过程中不再“做 1-2 项就停”
+  - 约束：除非遇到缺设计稿、真实 blocker、或与现有数据模型冲突，否则继续向下推进
+- [ ] 如果缺设计态，先记录缺口再补要稿
+  - 约束：先把“缺的页面内容 + 想要的效果”写进 story 文档，再向用户索要设计稿

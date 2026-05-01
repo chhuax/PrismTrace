@@ -214,6 +214,10 @@ pub struct ConsoleRequestSummary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsoleSessionSummary {
     pub session_id: String,
+    pub title: String,
+    pub subtitle: String,
+    pub cwd: Option<String>,
+    pub artifact_path: Option<String>,
     pub pid: u32,
     pub target_display_name: String,
     pub started_at_ms: u64,

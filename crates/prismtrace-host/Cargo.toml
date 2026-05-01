@@ -5,7 +5,10 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+prismtrace-analysis = { path = "../prismtrace-analysis" }
+prismtrace-api = { path = "../prismtrace-api" }
 prismtrace-core = { path = "../prismtrace-core" }
+prismtrace-index = { path = "../prismtrace-index" }
 prismtrace-storage = { path = "../prismtrace-storage" }
 serde_json = "1"
 tungstenite = "0.24"

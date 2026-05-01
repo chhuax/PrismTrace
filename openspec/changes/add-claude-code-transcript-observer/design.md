@@ -4,6 +4,12 @@
 
 新增 `ClaudeCodeTranscriptSource`，通过被动发现、读取并持续跟踪 `Claude Code` 默认落地到本机的 transcript `jsonl` 文件，将其中的高层会话事实投影到统一 observer 事件层。
 
+本轮实现边界进一步固定为：
+
+- 只做 host / CLI / artifact 闭环
+- 不接 console observer 展示
+- 不引入 attach、受控启动或 raw payload 抓取
+
 这条路线的核心前提是：
 
 - 不要求用户改启动方式
@@ -114,6 +120,21 @@
 - `--claude-transcript-root <path>` 主要用于调试和测试，不要求普通用户主动配置
 
 这条入口不应复用现有 `--attach`，避免把 transcript observer 和进程注入模型混淆。
+
+同时本轮 CLI 只要求完成：
+
+- startup summary
+- transcript root 发现
+- 历史扫描
+- 活跃 transcript 的最小增量 follow
+- handshake / event 输出
+- artifact 落盘
+
+不要求：
+
+- console UI 接线
+- 独立 replay 命令
+- 面向前端的额外交互协议
 
 ## Non-observable boundaries
 

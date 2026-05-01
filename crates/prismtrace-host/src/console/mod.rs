@@ -1,8 +1,12 @@
 use crate::BootstrapResult;
 use crate::discovery::{ProcessSampleSource, discover_targets};
+use prismtrace_api::{
+    ApiFilterContext, render_empty_capability_projection_payload,
+    render_empty_session_diagnostics_payload,
+};
 use prismtrace_core::ProcessTarget;
 use prismtrace_storage::StorageLayout;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -10,12 +14,20 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 
+mod api;
 pub(crate) mod model;
 mod observer;
 mod page;
 mod payload;
 mod server;
 
+pub(crate) use self::api::{
+    load_read_model_event_detail_payload, load_read_model_request_detail_payload,
+    load_read_model_request_summaries, load_read_model_session_detail_payload,
+    load_read_model_session_events_payload, load_read_model_session_summaries,
+    load_session_capabilities_payload, load_session_diagnostics_payload,
+    render_read_model_event_not_found_payload,
+};
 pub use self::model::{
     ConsoleActivityItem, ConsoleFilterContext, ConsoleHeaderDetail, ConsoleKnownErrorActivity,
     ConsoleRecentRequestActivity, ConsoleRequestDetail, ConsoleRequestSummary,
@@ -23,16 +35,13 @@ pub use self::model::{
     ConsoleSnapshot, ConsoleTargetFilterConfig, ConsoleTargetSummary, ConsoleToolSummary,
     ConsoleToolVisibilityDetail,
 };
-pub(crate) use self::observer::{
-    load_observer_activity_items, load_observer_request_detail_payload,
-    load_observer_request_summaries, load_observer_session_detail_payload,
-    load_observer_session_summaries, load_observer_target_summaries,
-};
+pub(crate) use self::observer::{load_observer_activity_items, load_observer_target_summaries};
 pub(crate) use self::page::render_console_homepage;
 pub(crate) use self::payload::{
     append_filter_context_fields, render_activity_payload_from_items, render_health_payload,
     render_request_detail_payload, render_requests_payload, render_session_detail_payload,
-    render_sessions_payload, render_targets_payload_from_summaries,
+    render_session_events_payload, render_sessions_payload_with_pagination,
+    render_targets_payload_from_summaries,
 };
 pub(crate) use self::server::collect_console_snapshot_for_bind_addr;
 pub use self::server::{
@@ -128,15 +137,43 @@ fn write_console_response_with_storage(
     write_console_response_for_path(request_path, stream, snapshot, storage, filter)
 }
 
-fn render_console_static_asset(path: &str) -> Option<(&'static str, String)> {
+fn render_console_static_asset(path: &str) -> Option<(&'static str, Vec<u8>)> {
     match path {
         "/assets/console.css" => Some((
             "text/css; charset=utf-8",
-            include_str!("../../assets/console.css").to_string(),
+            include_bytes!("../../assets/console.css").to_vec(),
         )),
         "/assets/console.js" => Some((
             "text/javascript; charset=utf-8",
-            include_str!("../../assets/console.js").to_string(),
+            include_bytes!("../../assets/console.js").to_vec(),
+        )),
+        "/assets/console-utilities.css" => Some((
+            "text/css; charset=utf-8",
+            include_bytes!("../../assets/console-utilities.css").to_vec(),
+        )),
+        "/assets/console-base.css" => Some((
+            "text/css; charset=utf-8",
+            include_bytes!("../../assets/console-base.css").to_vec(),
+        )),
+        "/assets/console-theme-dark.css" => Some((
+            "text/css; charset=utf-8",
+            include_bytes!("../../assets/console-theme-dark.css").to_vec(),
+        )),
+        "/assets/console-theme-light.css" => Some((
+            "text/css; charset=utf-8",
+            include_bytes!("../../assets/console-theme-light.css").to_vec(),
+        )),
+        "/assets/i18n/en-US.json" => Some((
+            "application/json; charset=utf-8",
+            include_bytes!("../../assets/i18n/en-US.json").to_vec(),
+        )),
+        "/assets/i18n/zh-CN.json" => Some((
+            "application/json; charset=utf-8",
+            include_bytes!("../../assets/i18n/zh-CN.json").to_vec(),
+        )),
+        "/assets/prismtrace-logo.png" => Some((
+            "image/png",
+            include_bytes!("../../assets/prismtrace-logo.png").to_vec(),
         )),
         _ => None,
     }
@@ -202,6 +239,13 @@ fn dedup_session_summaries(sessions: &mut Vec<ConsoleSessionSummary>) {
     sessions.retain(|session| seen.insert(session.session_id.clone()));
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConsoleRouteResponse {
+    status_line: &'static str,
+    content_type: &'static str,
+    body: Vec<u8>,
+}
+
 fn write_console_response_for_path(
     request_path: Option<String>,
     stream: &mut TcpStream,
@@ -209,21 +253,31 @@ fn write_console_response_for_path(
     storage: Option<&StorageLayout>,
     filter: Option<&ConsoleTargetFilterConfig>,
 ) -> io::Result<()> {
+    let response =
+        render_console_route_response(request_path.as_deref(), snapshot, storage, filter);
+    write_console_route_response(stream, &response)
+}
+
+fn render_console_route_response(
+    request_path: Option<&str>,
+    snapshot: &ConsoleSnapshot,
+    storage: Option<&StorageLayout>,
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> ConsoleRouteResponse {
     if let Some((content_type, body)) = request_path
-        .as_deref()
+        .map(route_path)
         .and_then(render_console_static_asset)
     {
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-
-        stream.write_all(response.as_bytes())?;
-        return stream.flush();
+        return ConsoleRouteResponse {
+            status_line: "HTTP/1.1 200 OK",
+            content_type,
+            body,
+        };
     }
 
-    let (status_line, content_type, body) = match request_path.as_deref() {
+    let request_target = request_path;
+    let route = request_target.map(route_path);
+    let (status_line, content_type, body) = match route {
         Some("/") => (
             "HTTP/1.1 200 OK",
             "text/html; charset=utf-8",
@@ -251,7 +305,7 @@ fn write_console_response_for_path(
         Some("/api/requests") => ("HTTP/1.1 200 OK", "application/json; charset=utf-8", {
             let mut requests = snapshot.request_summaries.clone();
             if let Some(storage) = storage {
-                requests.extend(load_observer_request_summaries(storage, filter));
+                requests.extend(load_read_model_request_summaries(storage, filter));
                 dedup_request_summaries(&mut requests);
                 sort_request_summaries(&mut requests);
             }
@@ -260,11 +314,15 @@ fn write_console_response_for_path(
         Some("/api/sessions") => ("HTTP/1.1 200 OK", "application/json; charset=utf-8", {
             let mut sessions = snapshot.session_summaries.clone();
             if let Some(storage) = storage {
-                sessions.extend(load_observer_session_summaries(storage, filter));
+                sessions.extend(load_read_model_session_summaries(storage, filter));
                 dedup_session_summaries(&mut sessions);
                 sort_session_summaries(&mut sessions);
             }
-            render_sessions_payload(&sessions, snapshot.filter_context.as_ref())
+            render_sessions_payload_with_pagination(
+                &sessions,
+                snapshot.filter_context.as_ref(),
+                request_target.and_then(session_pagination_from_request_target),
+            )
         }),
         Some("/api/health") => ("HTTP/1.1 200 OK", "application/json; charset=utf-8", {
             let mut targets = snapshot.target_summaries.clone();
@@ -284,6 +342,29 @@ fn write_console_response_for_path(
                 snapshot.filter_context.as_ref(),
             )
         }),
+        Some(path) if path.starts_with("/api/events/") => {
+            ("HTTP/1.1 200 OK", "application/json; charset=utf-8", {
+                let event_id = path.trim_start_matches("/api/events/");
+                match storage {
+                    Some(storage) => load_read_model_event_detail_payload(
+                        storage,
+                        event_id,
+                        filter,
+                        snapshot.filter_context.as_ref(),
+                    )
+                    .unwrap_or_else(|| {
+                        render_read_model_event_not_found_payload(
+                            event_id,
+                            snapshot.filter_context.as_ref(),
+                        )
+                    }),
+                    None => render_read_model_event_not_found_payload(
+                        event_id,
+                        snapshot.filter_context.as_ref(),
+                    ),
+                }
+            })
+        }
         Some(path) if path.starts_with("/api/requests/") => {
             ("HTTP/1.1 200 OK", "application/json; charset=utf-8", {
                 let request_id = path.trim_start_matches("/api/requests/");
@@ -298,7 +379,7 @@ fn write_console_response_for_path(
                         Some(detail),
                         snapshot.filter_context.as_ref(),
                     ),
-                    (Some(storage), None) => load_observer_request_detail_payload(
+                    (Some(storage), None) => load_read_model_request_detail_payload(
                         storage,
                         request_id,
                         filter,
@@ -319,6 +400,106 @@ fn write_console_response_for_path(
                 }
             })
         }
+        Some(path) if session_capabilities_route_session_id(path).is_some() => {
+            ("HTTP/1.1 200 OK", "application/json; charset=utf-8", {
+                let session_id =
+                    session_capabilities_route_session_id(path).expect("route guard should match");
+                match storage {
+                    Some(storage) => load_session_capabilities_payload(
+                        storage,
+                        session_id,
+                        filter,
+                        snapshot.filter_context.as_ref(),
+                    )
+                    .unwrap_or_else(|| {
+                        let api_filter_context =
+                            api_filter_context(snapshot.filter_context.as_ref());
+                        render_empty_capability_projection_payload(
+                            session_id,
+                            api_filter_context.as_ref(),
+                        )
+                    }),
+                    None => {
+                        let api_filter_context =
+                            api_filter_context(snapshot.filter_context.as_ref());
+                        render_empty_capability_projection_payload(
+                            session_id,
+                            api_filter_context.as_ref(),
+                        )
+                    }
+                }
+            })
+        }
+        Some(path) if session_diagnostics_route_session_id(path).is_some() => {
+            ("HTTP/1.1 200 OK", "application/json; charset=utf-8", {
+                let session_id =
+                    session_diagnostics_route_session_id(path).expect("route guard should match");
+                match storage {
+                    Some(storage) => load_session_diagnostics_payload(
+                        storage,
+                        session_id,
+                        filter,
+                        snapshot.filter_context.as_ref(),
+                    )
+                    .unwrap_or_else(|| {
+                        let api_filter_context =
+                            api_filter_context(snapshot.filter_context.as_ref());
+                        render_empty_session_diagnostics_payload(
+                            session_id,
+                            api_filter_context.as_ref(),
+                        )
+                    }),
+                    None => {
+                        let api_filter_context =
+                            api_filter_context(snapshot.filter_context.as_ref());
+                        render_empty_session_diagnostics_payload(
+                            session_id,
+                            api_filter_context.as_ref(),
+                        )
+                    }
+                }
+            })
+        }
+        Some(path) if session_events_route_session_id(path).is_some() => {
+            ("HTTP/1.1 200 OK", "application/json; charset=utf-8", {
+                let session_id =
+                    session_events_route_session_id(path).expect("route guard should match");
+                let detail = match storage {
+                    Some(storage) => load_session_detail(storage, session_id).ok().flatten(),
+                    None => load_session_detail_from_snapshot(snapshot, session_id),
+                }
+                .filter(|detail| session_detail_matches_filter(detail, filter));
+                match detail {
+                    Some(detail) => render_session_events_payload(
+                        session_id,
+                        &detail.timeline_items,
+                        snapshot.filter_context.as_ref(),
+                        request_target.and_then(session_pagination_from_request_target),
+                    ),
+                    None if storage.is_some() => load_read_model_session_events_payload(
+                        storage.expect("storage checked above"),
+                        session_id,
+                        filter,
+                        snapshot.filter_context.as_ref(),
+                        request_target.and_then(session_pagination_from_request_target),
+                    )
+                    .unwrap_or_else(|| {
+                        render_session_events_payload(
+                            session_id,
+                            &[],
+                            snapshot.filter_context.as_ref(),
+                            request_target.and_then(session_pagination_from_request_target),
+                        )
+                    }),
+                    None => render_session_events_payload(
+                        session_id,
+                        &[],
+                        snapshot.filter_context.as_ref(),
+                        request_target.and_then(session_pagination_from_request_target),
+                    ),
+                }
+            })
+        }
         Some(path) if path.starts_with("/api/sessions/") => {
             ("HTTP/1.1 200 OK", "application/json; charset=utf-8", {
                 let session_id = path.trim_start_matches("/api/sessions/");
@@ -333,7 +514,7 @@ fn write_console_response_for_path(
                         Some(detail),
                         snapshot.filter_context.as_ref(),
                     ),
-                    (Some(storage), None) => load_observer_session_detail_payload(
+                    (Some(storage), None) => load_read_model_session_detail_payload(
                         storage,
                         session_id,
                         filter,
@@ -354,6 +535,11 @@ fn write_console_response_for_path(
                 }
             })
         }
+        Some(path) if path.starts_with("/api/") => (
+            "HTTP/1.1 404 Not Found",
+            "application/json; charset=utf-8",
+            render_json_error_payload("not_found", &format!("unknown API route: {path}")),
+        ),
         Some(_) => (
             "HTTP/1.1 404 Not Found",
             "text/html; charset=utf-8",
@@ -366,14 +552,98 @@ fn write_console_response_for_path(
         ),
     };
 
-    let response = format!(
-        "{status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        body.len(),
-        body
+    ConsoleRouteResponse {
+        status_line,
+        content_type,
+        body: body.into_bytes(),
+    }
+}
+
+fn write_console_route_response(
+    stream: &mut TcpStream,
+    response: &ConsoleRouteResponse,
+) -> io::Result<()> {
+    let header = format!(
+        "{}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        response.status_line,
+        response.content_type,
+        response.body.len()
     );
 
-    stream.write_all(response.as_bytes())?;
+    stream.write_all(header.as_bytes())?;
+    stream.write_all(&response.body)?;
     stream.flush()
+}
+
+pub(crate) fn write_console_json_error_response(
+    stream: &mut TcpStream,
+    status_line: &'static str,
+    code: &str,
+    message: &str,
+) -> io::Result<()> {
+    let response = ConsoleRouteResponse {
+        status_line,
+        content_type: "application/json; charset=utf-8",
+        body: render_json_error_payload(code, message).into_bytes(),
+    };
+    write_console_route_response(stream, &response)
+}
+
+fn render_json_error_payload(code: &str, message: &str) -> String {
+    json!({
+        "error": {
+            "code": code,
+            "message": message,
+        }
+    })
+    .to_string()
+}
+
+fn route_path(request_target: &str) -> &str {
+    request_target
+        .split_once('?')
+        .map(|(path, _)| path)
+        .unwrap_or(request_target)
+}
+
+fn session_pagination_from_request_target(request_target: &str) -> Option<(usize, usize)> {
+    let query = request_target.split_once('?')?.1;
+    let limit = query_param(query, "limit")?
+        .parse::<usize>()
+        .ok()
+        .filter(|limit| *limit > 0)?;
+    let cursor = query_param(query, "cursor")
+        .and_then(|cursor| cursor.parse::<usize>().ok())
+        .unwrap_or_default();
+    Some((cursor, limit))
+}
+
+fn session_events_route_session_id(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/sessions/")?.strip_suffix("/events")
+}
+
+fn session_capabilities_route_session_id(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/sessions/")?
+        .strip_suffix("/capabilities")
+}
+
+fn session_diagnostics_route_session_id(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/sessions/")?
+        .strip_suffix("/diagnostics")
+}
+
+fn api_filter_context(filter_context: Option<&ConsoleFilterContext>) -> Option<ApiFilterContext> {
+    filter_context.map(|filter_context| ApiFilterContext {
+        active_filters: filter_context.active_filters.clone(),
+        is_filtered_view: filter_context.is_filtered_view,
+    })
+}
+
+fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
+    query.split('&').find_map(|pair| {
+        let (name, value) = pair.split_once('=')?;
+        (name == key).then_some(value)
+    })
 }
 
 fn write_live_console_response(
@@ -383,12 +653,34 @@ fn write_live_console_response(
     filter: Option<&ConsoleTargetFilterConfig>,
 ) -> io::Result<()> {
     let request_path = read_request_path(stream)?;
-    let include_sessions = request_path
+    let request_route = request_path.as_deref().map(route_path);
+    if let Some((content_type, body)) = request_path
         .as_deref()
+        .map(route_path)
+        .and_then(render_console_static_asset)
+    {
+        return write_console_bytes_response(stream, content_type, &body);
+    }
+
+    if request_route == Some("/") || request_route == Some("/favicon.ico") {
+        let snapshot = lightweight_console_snapshot(bind_addr, filter);
+        return write_console_response_for_path(
+            request_path,
+            stream,
+            &snapshot,
+            Some(&result.storage),
+            filter,
+        );
+    }
+
+    let include_sessions = request_route
         .map(|path| path == "/" || path == "/api/sessions" || path.starts_with("/api/sessions/"))
         .unwrap_or(false);
-    let snapshot =
-        collect_console_snapshot_for_bind_addr(result, bind_addr, filter, include_sessions);
+    let snapshot = if include_sessions {
+        session_console_snapshot(result, bind_addr, filter)
+    } else {
+        collect_console_snapshot_for_bind_addr(result, bind_addr, filter, false)
+    };
     write_console_response_for_path(
         request_path,
         stream,
@@ -396,6 +688,57 @@ fn write_live_console_response(
         Some(&result.storage),
         filter,
     )
+}
+
+fn write_console_bytes_response(
+    stream: &mut TcpStream,
+    content_type: &str,
+    body: &[u8],
+) -> io::Result<()> {
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+
+    stream.write_all(response.as_bytes())?;
+    stream.write_all(body)?;
+    stream.flush()
+}
+
+fn lightweight_console_snapshot(
+    bind_addr: &str,
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> ConsoleSnapshot {
+    ConsoleSnapshot {
+        summary: "PrismTrace console".into(),
+        bind_addr: format!("http://{bind_addr}"),
+        filter_context: model::console_filter_context(filter),
+        target_summaries: Vec::new(),
+        activity_items: Vec::new(),
+        request_summaries: Vec::new(),
+        session_summaries: Vec::new(),
+        request_details: Vec::new(),
+        session_details: Vec::new(),
+    }
+}
+
+fn session_console_snapshot(
+    result: &BootstrapResult,
+    bind_addr: &str,
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> ConsoleSnapshot {
+    let mut session_summaries = model::filter_session_summaries(
+        &load_session_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
+        filter,
+    );
+    session_summaries.extend(load_read_model_session_summaries(&result.storage, filter));
+    dedup_session_summaries(&mut session_summaries);
+    sort_session_summaries(&mut session_summaries);
+
+    ConsoleSnapshot {
+        session_summaries,
+        ..lightweight_console_snapshot(bind_addr, filter)
+    }
 }
 
 fn read_request_path(stream: &mut TcpStream) -> io::Result<Option<String>> {
@@ -660,21 +1003,53 @@ pub fn load_session_summaries(storage: &StorageLayout) -> io::Result<Vec<Console
 
     Ok(sessions
         .into_iter()
-        .map(|detail| ConsoleSessionSummary {
-            session_id: detail.session_id,
-            pid: detail.pid,
-            target_display_name: detail.target_display_name,
-            started_at_ms: detail.started_at_ms,
-            completed_at_ms: detail.completed_at_ms,
-            exchange_count: detail.exchange_count,
-            request_count: detail.exchange_count,
-            response_count: detail
+        .map(|detail| {
+            let title = derive_session_title(&detail);
+            let subtitle = derive_session_subtitle(&detail);
+            let response_count = detail
                 .timeline_items
                 .iter()
                 .filter(|item| item.has_response)
-                .count(),
+                .count();
+
+            ConsoleSessionSummary {
+                session_id: detail.session_id,
+                title,
+                subtitle,
+                cwd: None,
+                artifact_path: None,
+                pid: detail.pid,
+                target_display_name: detail.target_display_name,
+                started_at_ms: detail.started_at_ms,
+                completed_at_ms: detail.completed_at_ms,
+                exchange_count: detail.exchange_count,
+                request_count: detail.exchange_count,
+                response_count,
+            }
         })
         .collect())
+}
+
+fn derive_session_title(detail: &ConsoleSessionDetail) -> String {
+    detail
+        .timeline_items
+        .iter()
+        .find_map(|item| {
+            let summary = item.request_summary.trim();
+            (!summary.is_empty()).then(|| summary.to_string())
+        })
+        .unwrap_or_else(|| detail.target_display_name.clone())
+}
+
+fn derive_session_subtitle(detail: &ConsoleSessionDetail) -> String {
+    detail
+        .timeline_items
+        .first()
+        .map(|item| match item.model.as_deref() {
+            Some(model) if !model.trim().is_empty() => format!("{} · {}", item.provider, model),
+            _ => item.provider.clone(),
+        })
+        .unwrap_or_else(|| format!("session {}", detail.session_id))
 }
 
 pub fn load_session_detail(

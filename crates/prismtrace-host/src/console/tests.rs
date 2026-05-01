@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 static UNIQUE_TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -232,7 +232,7 @@ fn render_health_payload_filters_errors_by_matching_pid() {
 }
 
 #[test]
-fn render_console_homepage_shows_filter_context_when_filters_are_active() {
+fn render_console_homepage_keeps_ia_shell_when_filters_are_active() {
     let homepage = super::render_console_homepage(&ConsoleSnapshot {
         summary: "PrismTrace host skeleton".into(),
         bind_addr: "http://127.0.0.1:7799".into(),
@@ -248,12 +248,11 @@ fn render_console_homepage_shows_filter_context_when_filters_are_active() {
         session_details: vec![],
     });
 
+    assert!(homepage.contains("PrismTrace"), "homepage: {homepage}");
     assert!(
-        homepage.contains("Filtered monitor scope"),
+        homepage.contains("id=\"session-list-region\""),
         "homepage: {homepage}"
     );
-    assert!(homepage.contains("opencode"), "homepage: {homepage}");
-    assert!(homepage.contains("codex"), "homepage: {homepage}");
 }
 
 #[test]
@@ -270,10 +269,7 @@ fn render_console_homepage_hides_filter_context_when_unfiltered() {
         session_details: vec![],
     });
 
-    assert!(
-        !homepage.contains("Filtered monitor scope"),
-        "homepage: {homepage}"
-    );
+    assert!(homepage.contains("data-theme="), "homepage: {homepage}");
 }
 
 #[test]
@@ -353,7 +349,65 @@ fn render_requests_payload_uses_filtered_no_match_empty_state_when_context_is_ac
 }
 
 #[test]
-fn render_console_homepage_exposes_filter_banner_and_data_regions_when_context_is_active() {
+fn render_requests_payload_exposes_compatible_list_envelope() {
+    let payload = super::render_requests_payload(
+        &[super::ConsoleRequestSummary {
+            request_id: "request-1".into(),
+            captured_at_ms: 100,
+            provider: "openai".into(),
+            model: Some("gpt-4.1".into()),
+            target_display_name: "Codex Desktop".into(),
+            summary_text: "openai POST /v1/responses".into(),
+        }],
+        None,
+    );
+
+    assert!(payload.contains("\"requests\":["), "payload: {payload}");
+    assert!(payload.contains("\"items\":["), "payload: {payload}");
+    assert!(
+        payload.contains("\"next_cursor\":null"),
+        "payload: {payload}"
+    );
+}
+
+#[test]
+fn render_sessions_payload_exposes_compatible_list_envelope() {
+    let payload = super::render_sessions_payload_with_pagination(
+        &[super::ConsoleSessionSummary {
+            session_id: "session-1".into(),
+            title: "Debug prompt drift".into(),
+            subtitle: "thread session-1".into(),
+            cwd: Some("/tmp/workspace".into()),
+            artifact_path: Some("/tmp/session.jsonl".into()),
+            pid: 0,
+            target_display_name: "Codex Desktop".into(),
+            started_at_ms: 100,
+            completed_at_ms: 200,
+            exchange_count: 2,
+            request_count: 2,
+            response_count: 1,
+        }],
+        Some(&super::ConsoleFilterContext {
+            active_filters: vec!["codex".into()],
+            is_filtered_view: true,
+        }),
+        None,
+    );
+
+    assert!(payload.contains("\"sessions\":["), "payload: {payload}");
+    assert!(payload.contains("\"items\":["), "payload: {payload}");
+    assert!(
+        payload.contains("\"next_cursor\":null"),
+        "payload: {payload}"
+    );
+    assert!(
+        payload.contains("\"active_filters\":[\"codex\"]"),
+        "payload: {payload}"
+    );
+}
+
+#[test]
+fn render_console_homepage_exposes_ia_data_regions_when_context_is_active() {
     let homepage = super::render_console_homepage(&ConsoleSnapshot {
         summary: "PrismTrace host skeleton".into(),
         bind_addr: "http://127.0.0.1:7799".into(),
@@ -370,19 +424,15 @@ fn render_console_homepage_exposes_filter_banner_and_data_regions_when_context_i
     });
 
     assert!(
-        homepage.contains("Filtered monitor scope"),
+        homepage.contains("id=\"runtime-list-region\""),
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("id=\"filter-context-region\""),
+        homepage.contains("id=\"session-list-region\""),
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("id=\"targets-region\""),
-        "homepage: {homepage}"
-    );
-    assert!(
-        homepage.contains("id=\"requests-region\""),
+        homepage.contains("id=\"transcript-region\""),
         "homepage: {homepage}"
     );
 }
@@ -433,11 +483,41 @@ fn console_server_serves_homepage_over_http() -> io::Result<()> {
         .nth(1)
         .expect("response should include body");
 
-    assert!(body.contains("PrismTrace Observer Console"), "body: {body}");
-    assert!(body.contains("Sources"), "body: {body}");
-    assert!(body.contains("Activity"), "body: {body}");
-    assert!(body.contains("Unified Telemetry Feed"), "body: {body}");
+    assert!(body.contains("PrismTrace"), "body: {body}");
+    assert!(body.contains("Sessions"), "body: {body}");
+    assert!(body.contains("Agent Runtime"), "body: {body}");
+    assert!(body.contains("id=\"right-sidebar\""), "body: {body}");
 
+    handle.join().expect("server thread should join")?;
+    fs::remove_dir_all(result.config.state_root)?;
+    Ok(())
+}
+
+#[test]
+fn console_server_handles_static_asset_while_previous_connection_is_idle() -> io::Result<()> {
+    let workspace_root = unique_test_dir();
+    let result = bootstrap(&workspace_root)?;
+    let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+    let addr = server
+        .local_url()?
+        .trim_start_matches("http://")
+        .to_string();
+
+    let handle = thread::spawn(move || server.serve_connections_for_test(2));
+    let idle_stream = TcpStream::connect(&addr)?;
+
+    let response = send_get_request(&addr, "/assets/console.js")?;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("const escapeHtml"),
+        "response: {response}"
+    );
+
+    drop(idle_stream);
     handle.join().expect("server thread should join")?;
     fs::remove_dir_all(result.config.state_root)?;
     Ok(())
@@ -457,14 +537,8 @@ fn render_console_homepage_includes_title_and_heading() {
         session_details: vec![],
     });
 
-    assert!(
-        homepage.contains("<title>PrismTrace Observer Console Overview</title>"),
-        "homepage: {homepage}"
-    );
-    assert!(
-        homepage.contains("PrismTrace Observer Console"),
-        "homepage: {homepage}"
-    );
+    assert!(homepage.contains("<title"), "homepage: {homepage}");
+    assert!(homepage.contains("PrismTrace"), "homepage: {homepage}");
 }
 
 #[test]
@@ -481,12 +555,8 @@ fn render_console_homepage_exposes_theme_switcher() {
         session_details: vec![],
     });
 
-    assert!(homepage.contains("Theme</p>"), "homepage: {homepage}");
-    assert!(homepage.contains("?theme=light"), "homepage: {homepage}");
-    assert!(
-        homepage.contains("data-theme=\"system\""),
-        "homepage: {homepage}"
-    );
+    assert!(homepage.contains("class=\"light\""), "homepage: {homepage}");
+    assert!(homepage.contains("data-theme="), "homepage: {homepage}");
 }
 
 #[test]
@@ -500,6 +570,10 @@ fn render_console_homepage_seeds_initial_session_selection_for_js_hydration() {
         request_summaries: vec![],
         session_summaries: vec![super::ConsoleSessionSummary {
             session_id: "session-1".into(),
+            title: "openai POST /v1/responses".into(),
+            subtitle: "openai · responses".into(),
+            cwd: None,
+            artifact_path: None,
             pid: 701,
             target_display_name: "Codex".into(),
             started_at_ms: 10,
@@ -541,7 +615,7 @@ fn render_console_homepage_seeds_initial_session_selection_for_js_hydration() {
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("id=\"session-detail-region\""),
+        homepage.contains("id=\"transcript-region\""),
         "homepage: {homepage}"
     );
     assert!(homepage.contains("Sessions"), "homepage: {homepage}");
@@ -570,10 +644,6 @@ fn render_console_homepage_seeds_initial_request_selection_for_js_hydration() {
 
     assert!(
         homepage.contains("data-initial-request-id=\"req-1\""),
-        "homepage: {homepage}"
-    );
-    assert!(
-        homepage.contains("id=\"requests-region\""),
         "homepage: {homepage}"
     );
     assert!(
@@ -618,15 +688,15 @@ fn render_console_homepage_renders_empty_regions_and_refresh_script() {
     });
 
     assert!(
-        homepage.contains("id=\"targets-region\""),
+        homepage.contains("id=\"runtime-list-region\""),
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("id=\"activity-region\""),
+        homepage.contains("id=\"session-list-region\""),
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("id=\"requests-region\""),
+        homepage.contains("id=\"transcript-region\""),
         "homepage: {homepage}"
     );
     assert!(
@@ -658,6 +728,10 @@ fn render_console_homepage_uses_observer_first_shell_copy() {
         request_summaries: vec![],
         session_summaries: vec![super::ConsoleSessionSummary {
             session_id: "observer:codex:1714000005000-77".into(),
+            title: "Thread started".into(),
+            subtitle: "thread thread-1 · thread".into(),
+            cwd: None,
+            artifact_path: None,
             pid: 0,
             target_display_name: "Codex App Server".into(),
             started_at_ms: 1714000005000,
@@ -670,14 +744,10 @@ fn render_console_homepage_uses_observer_first_shell_copy() {
         session_details: vec![],
     });
 
-    assert!(
-        homepage.contains("PrismTrace Observer Console"),
-        "homepage: {homepage}"
-    );
-    assert!(homepage.contains("Sources"), "homepage: {homepage}");
+    assert!(homepage.contains("PrismTrace"), "homepage: {homepage}");
     assert!(homepage.contains("Sessions"), "homepage: {homepage}");
     assert!(
-        homepage.contains("Unified Telemetry Feed"),
+        homepage.contains("id=\"right-sidebar\""),
         "homepage: {homepage}"
     );
     assert!(
@@ -764,13 +834,12 @@ fn render_console_homepage_renders_request_detail_and_health_panel_regions() {
         session_details: vec![],
     });
 
-    assert!(homepage.contains("INSPECTOR_LOG"), "homepage: {homepage}");
     assert!(
-        homepage.contains("id=\"request-detail-region\""),
+        homepage.contains("id=\"analysis-message-region\""),
         "homepage: {homepage}"
     );
     assert!(
-        homepage.contains("id=\"health-region\""),
+        homepage.contains("id=\"analysis-context-summary\""),
         "homepage: {homepage}"
     );
     assert!(
@@ -809,7 +878,7 @@ fn render_console_homepage_renders_health_shell_region() {
     });
 
     assert!(
-        homepage.contains("id=\"health-region\""),
+        homepage.contains("id=\"runtime-list-region\""),
         "homepage: {homepage}"
     );
     assert!(
@@ -953,6 +1022,73 @@ fn console_server_returns_not_found_for_unknown_path() -> io::Result<()> {
 }
 
 #[test]
+fn console_server_returns_json_error_for_unknown_api_path() -> io::Result<()> {
+    let workspace_root = unique_test_dir();
+    let result = bootstrap(&workspace_root)?;
+    let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+    let addr = server
+        .local_url()?
+        .trim_start_matches("http://")
+        .to_string();
+
+    let handle = thread::spawn(move || server.serve_once());
+
+    let response = send_get_request(&addr, "/api/missing")?;
+
+    assert!(
+        response.starts_with("HTTP/1.1 404 Not Found"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("Content-Type: application/json; charset=utf-8"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"code\":\"not_found\""),
+        "response: {response}"
+    );
+
+    handle.join().expect("server thread should join")?;
+    fs::remove_dir_all(result.config.state_root)?;
+    Ok(())
+}
+
+#[test]
+fn console_server_returns_json_error_when_request_read_times_out() -> io::Result<()> {
+    let workspace_root = unique_test_dir();
+    let result = bootstrap(&workspace_root)?;
+    let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+    let addr = server
+        .local_url()?
+        .trim_start_matches("http://")
+        .to_string();
+
+    let handle =
+        thread::spawn(move || server.serve_once_with_timeout_for_test(Duration::from_millis(25)));
+    let mut client_stream = TcpStream::connect(&addr)?;
+    client_stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+    let mut response = String::new();
+    client_stream.read_to_string(&mut response)?;
+
+    assert!(
+        response.starts_with("HTTP/1.1 408 Request Timeout"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("Content-Type: application/json; charset=utf-8"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"code\":\"request_timeout\""),
+        "response: {response}"
+    );
+
+    handle.join().expect("server thread should join")?;
+    fs::remove_dir_all(result.config.state_root)?;
+    Ok(())
+}
+
+#[test]
 fn console_server_returns_targets_api_payload() -> io::Result<()> {
     let snapshot = ConsoleSnapshot {
         summary: "summary".into(),
@@ -1025,6 +1161,162 @@ fn console_server_returns_filtered_targets_api_empty_state_and_context() -> io::
     );
     assert!(
         response.contains("当前过滤条件下没有匹配 source"),
+        "response: {response}"
+    );
+
+    handle.join().expect("server thread should join")?;
+    Ok(())
+}
+
+#[test]
+fn console_server_sessions_api_applies_limit_and_cursor() -> io::Result<()> {
+    let snapshot = ConsoleSnapshot {
+        summary: "summary".into(),
+        bind_addr: "http://127.0.0.1:7799".into(),
+        filter_context: None,
+        target_summaries: vec![],
+        activity_items: vec![],
+        request_summaries: vec![],
+        session_summaries: vec![
+            super::ConsoleSessionSummary {
+                session_id: "session-new".into(),
+                title: "New".into(),
+                subtitle: "new session".into(),
+                cwd: None,
+                artifact_path: None,
+                pid: 0,
+                target_display_name: "Codex Desktop".into(),
+                started_at_ms: 200,
+                completed_at_ms: 200,
+                exchange_count: 1,
+                request_count: 1,
+                response_count: 1,
+            },
+            super::ConsoleSessionSummary {
+                session_id: "session-old".into(),
+                title: "Old".into(),
+                subtitle: "old session".into(),
+                cwd: None,
+                artifact_path: None,
+                pid: 0,
+                target_display_name: "Codex Desktop".into(),
+                started_at_ms: 100,
+                completed_at_ms: 100,
+                exchange_count: 1,
+                request_count: 1,
+                response_count: 1,
+            },
+        ],
+        request_details: vec![],
+        session_details: vec![],
+    };
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let addr = listener.local_addr()?;
+
+    let handle = thread::spawn(move || -> io::Result<()> {
+        let (mut server_stream, _) = listener.accept()?;
+        write_console_response(&mut server_stream, &snapshot)
+    });
+
+    let response = send_get_request(&addr.to_string(), "/api/sessions?limit=1")?;
+
+    assert!(
+        response.contains("\"session_id\":\"session-new\""),
+        "response: {response}"
+    );
+    assert!(
+        !response.contains("\"session_id\":\"session-old\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"next_cursor\":\"1\""),
+        "response: {response}"
+    );
+
+    handle.join().expect("server thread should join")?;
+    Ok(())
+}
+
+#[test]
+fn console_server_session_events_api_applies_limit_and_cursor() -> io::Result<()> {
+    let snapshot = ConsoleSnapshot {
+        summary: "summary".into(),
+        bind_addr: "http://127.0.0.1:7799".into(),
+        filter_context: None,
+        target_summaries: vec![],
+        activity_items: vec![],
+        request_summaries: vec![],
+        session_summaries: vec![],
+        request_details: vec![],
+        session_details: vec![super::ConsoleSessionDetail {
+            session_id: "session-1".into(),
+            pid: 0,
+            target_display_name: "Codex Desktop".into(),
+            started_at_ms: 100,
+            completed_at_ms: 300,
+            last_exchange_started_at_ms: 200,
+            exchange_count: 2,
+            timeline_items: vec![
+                super::ConsoleSessionTimelineItem {
+                    request_id: "event-1".into(),
+                    exchange_id: Some("turn-1".into()),
+                    pid: 0,
+                    target_display_name: "Codex Desktop".into(),
+                    provider: "codex-rollout".into(),
+                    model: Some("message".into()),
+                    started_at_ms: 100,
+                    completed_at_ms: 100,
+                    duration_ms: 0,
+                    request_summary: "first".into(),
+                    response_status: Some(200),
+                    tool_count_final: 0,
+                    has_response: true,
+                    has_tool_visibility: false,
+                },
+                super::ConsoleSessionTimelineItem {
+                    request_id: "event-2".into(),
+                    exchange_id: Some("turn-2".into()),
+                    pid: 0,
+                    target_display_name: "Codex Desktop".into(),
+                    provider: "codex-rollout".into(),
+                    model: Some("tool".into()),
+                    started_at_ms: 200,
+                    completed_at_ms: 200,
+                    duration_ms: 0,
+                    request_summary: "second".into(),
+                    response_status: Some(200),
+                    tool_count_final: 1,
+                    has_response: true,
+                    has_tool_visibility: true,
+                },
+            ],
+        }],
+    };
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let addr = listener.local_addr()?;
+
+    let handle = thread::spawn(move || -> io::Result<()> {
+        let (mut server_stream, _) = listener.accept()?;
+        write_console_response(&mut server_stream, &snapshot)
+    });
+
+    let response = send_get_request(&addr.to_string(), "/api/sessions/session-1/events?limit=1")?;
+
+    assert!(
+        response.contains("\"session_id\":\"session-1\""),
+        "response: {response}"
+    );
+    assert!(response.contains("\"items\":["), "response: {response}");
+    assert!(
+        response.contains("\"request_id\":\"event-1\""),
+        "response: {response}"
+    );
+    assert!(
+        !response.contains("\"request_id\":\"event-2\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"next_cursor\":\"1\""),
         "response: {response}"
     );
 
@@ -1311,6 +1603,34 @@ fn console_server_returns_requests_api_payload() -> io::Result<()> {
     handle.join().expect("server thread should join")?;
     fs::remove_dir_all(result.config.state_root)?;
     Ok(())
+}
+
+#[test]
+fn console_route_handler_renders_health_without_tcp() {
+    let snapshot = ConsoleSnapshot {
+        summary: "summary".into(),
+        bind_addr: "http://127.0.0.1:7799".into(),
+        filter_context: None,
+        target_summaries: vec![super::ConsoleTargetSummary {
+            pid: 42,
+            display_name: "Codex".into(),
+            runtime_kind: "electron".into(),
+            source_state: "discoverable".into(),
+            source_summary: "running".into(),
+        }],
+        activity_items: vec![],
+        request_summaries: vec![],
+        session_summaries: vec![],
+        request_details: vec![],
+        session_details: vec![],
+    };
+
+    let response = super::render_console_route_response(Some("/api/health"), &snapshot, None, None);
+
+    assert_eq!(response.status_line, "HTTP/1.1 200 OK");
+    assert_eq!(response.content_type, "application/json; charset=utf-8");
+    let body = String::from_utf8(response.body).expect("health response should be utf-8");
+    assert!(body.contains("\"source_summary\":\"running\""));
 }
 
 #[test]
@@ -2030,6 +2350,91 @@ fn console_server_returns_session_detail_api_payload() -> io::Result<()> {
 }
 
 #[test]
+fn console_server_returns_request_embedded_tool_capabilities_api_payload() -> io::Result<()> {
+    let workspace_root = unique_test_dir();
+    let result = bootstrap(&workspace_root)?;
+    let requests_dir = result.storage.artifacts_dir.join("requests");
+    fs::create_dir_all(&requests_dir)?;
+    fs::write(
+        requests_dir.join("1714000005000-77-1.json"),
+        serde_json::json!({
+            "event_id": "demo-request",
+            "exchange_id": "ex-demo",
+            "pid": 77,
+            "target_display_name": "NodeApp",
+            "provider_hint": "openai",
+            "hook_name": "fetch",
+            "method": "POST",
+            "url": "https://api.openai.com/v1/responses",
+            "headers": [],
+            "body_text": "{\"model\":\"gpt-4.1\"}",
+            "body_size_bytes": 19,
+            "truncated": false,
+            "captured_at_ms": 1714000005000u64,
+        })
+        .to_string(),
+    )?;
+    let tool_visibility_dir = result.storage.artifacts_dir.join("tool_visibility");
+    fs::create_dir_all(&tool_visibility_dir)?;
+    fs::write(
+        tool_visibility_dir.join("1714000005000-77-1.json"),
+        serde_json::json!({
+            "request_id": "demo-request",
+            "exchange_id": "ex-demo",
+            "captured_at_ms": 1714000005000u64,
+            "visibility_stage": "request-embedded",
+            "tool_choice": "auto",
+            "final_tools_json": [
+                {
+                    "type": "function",
+                    "function": { "name": "list_files" }
+                }
+            ],
+            "tool_count_final": 1
+        })
+        .to_string(),
+    )?;
+
+    let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+    let addr = server
+        .local_url()?
+        .trim_start_matches("http://")
+        .to_string();
+    let handle = thread::spawn(move || server.serve_once());
+
+    let response = send_get_request(&addr, "/api/sessions/77-1714000005000-1/capabilities")?;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"session_id\":\"77-1714000005000-1\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"capability_type\":\"function\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"capability_name\":\"list_files\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"visibility_stage\":\"request-embedded\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"source_kind\":\"tool_visibility\""),
+        "response: {response}"
+    );
+
+    handle.join().expect("server thread should join")?;
+    fs::remove_dir_all(result.config.state_root)?;
+    Ok(())
+}
+
+#[test]
 fn console_server_returns_filtered_sessions_api_without_unmatched_sessions() -> io::Result<()> {
     let workspace_root = unique_test_dir();
     let result = bootstrap(&workspace_root)?;
@@ -2321,6 +2726,343 @@ fn console_server_returns_observer_request_detail_api_payload() -> io::Result<()
 }
 
 #[test]
+fn console_server_returns_observer_event_detail_api_payload() -> io::Result<()> {
+    let workspace_root = unique_test_dir();
+    let result = bootstrap(&workspace_root)?;
+    let observer_dir = result
+        .storage
+        .artifacts_dir
+        .join("observer_events")
+        .join("codex");
+    fs::create_dir_all(&observer_dir)?;
+    fs::write(
+        observer_dir.join("1714000005000-77.jsonl"),
+        concat!(
+            "{\"record_type\":\"handshake\",\"channel\":\"codex-app-server\",\"transport\":\"ipc\",\"server_label\":\"Codex App Server\",\"recorded_at_ms\":1714000005000,\"raw_json\":{}}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"tool\",\"summary\":\"Ran shell command\",\"method\":\"shell.exec\",\"thread_id\":\"thread-1\",\"turn_id\":\"turn-1\",\"item_id\":\"item-1\",\"timestamp\":\"2026-04-26T10:00:00Z\",\"recorded_at_ms\":1714000005100,\"raw_json\":{\"tool\":\"exec_command\",\"args\":\"cargo test\"}}\n"
+        ),
+    )?;
+
+    let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+    let addr = server
+        .local_url()?
+        .trim_start_matches("http://")
+        .to_string();
+    let handle = thread::spawn(move || server.serve_once());
+
+    let response = send_get_request(&addr, "/api/events/observer:codex:1714000005000-77:1")?;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"event_id\":\"observer:codex:1714000005000-77:1\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"session_id\":\"observer:codex:1714000005000-77\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"kind\":\"observer_event\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"channel\":\"codex-app-server\""),
+        "response: {response}"
+    );
+    assert!(response.contains("\"raw_json\""), "response: {response}");
+    assert!(response.contains("exec_command"), "response: {response}");
+    assert!(
+        !response.contains("\"request\":"),
+        "response should not use legacy request envelope: {response}"
+    );
+
+    handle.join().expect("server thread should join")?;
+    fs::remove_dir_all(result.config.state_root)?;
+    Ok(())
+}
+
+#[test]
+fn console_server_returns_observer_session_capabilities_api_payload() -> io::Result<()> {
+    let workspace_root = unique_test_dir();
+    let result = bootstrap(&workspace_root)?;
+    let observer_dir = result
+        .storage
+        .artifacts_dir
+        .join("observer_events")
+        .join("codex");
+    fs::create_dir_all(&observer_dir)?;
+    fs::write(
+        observer_dir.join("1714000005000-77.jsonl"),
+        concat!(
+            "{\"record_type\":\"handshake\",\"channel\":\"codex-app-server\",\"transport\":\"ipc\",\"server_label\":\"Codex App Server\",\"recorded_at_ms\":1714000005000,\"raw_json\":{}}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"skill\",\"summary\":\"skills/list returned 2 entries\",\"method\":\"skills/list\",\"recorded_at_ms\":1714000005100,\"raw_json\":{\"method\":\"skills/list\",\"skill_names_preview\":[\"review\",\"test\"]}}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"mcp\",\"summary\":\"mcpServer/listStatus returned 1 entries\",\"method\":\"mcpServer/listStatus\",\"recorded_at_ms\":1714000005200,\"raw_json\":{\"method\":\"mcpServer/listStatus\",\"mcp_server_names_preview\":[\"github\"]}}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"plugin\",\"summary\":\"plugin/list returned 1 entries\",\"method\":\"plugin/list\",\"recorded_at_ms\":1714000005300,\"raw_json\":{\"method\":\"plugin/list\",\"marketplace_names_preview\":[\"github\"]}}\n"
+        ),
+    )?;
+
+    let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+    let addr = server
+        .local_url()?
+        .trim_start_matches("http://")
+        .to_string();
+    let handle = thread::spawn(move || server.serve_once());
+
+    let response = send_get_request(
+        &addr,
+        "/api/sessions/observer:codex:1714000005000-77/capabilities",
+    )?;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"session_id\":\"observer:codex:1714000005000-77\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"capability_type\":\"skill\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"capability_name\":\"review\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"capability_type\":\"plugin\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"capability_type\":\"mcp\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"capability_name\":\"github\""),
+        "response: {response}"
+    );
+    assert!(response.contains("\"raw_ref\""), "response: {response}");
+
+    handle.join().expect("server thread should join")?;
+    fs::remove_dir_all(result.config.state_root)?;
+    Ok(())
+}
+
+#[test]
+fn console_server_returns_observer_session_diagnostics_api_payload() -> io::Result<()> {
+    let workspace_root = unique_test_dir();
+    let result = bootstrap(&workspace_root)?;
+    let observer_dir = result
+        .storage
+        .artifacts_dir
+        .join("observer_events")
+        .join("codex");
+    fs::create_dir_all(&observer_dir)?;
+    fs::write(
+        observer_dir.join("1714000005000-77.jsonl"),
+        concat!(
+            "{\"record_type\":\"handshake\",\"channel\":\"codex-app-server\",\"transport\":\"ipc\",\"server_label\":\"Codex App Server\",\"recorded_at_ms\":1714000005000,\"raw_json\":{}}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"message\",\"summary\":\"User: hello\",\"recorded_at_ms\":1714000005100,\"raw_json\":{\"full_text\":\"hello\\nuse cargo test\"}}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"message\",\"summary\":\"User: hello\",\"recorded_at_ms\":1714000005200,\"raw_json\":{\"full_text\":\"hello\\nuse cargo clippy\"}}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"skill\",\"summary\":\"skills/list returned 1 entries\",\"method\":\"skills/list\",\"recorded_at_ms\":1714000005300,\"raw_json\":{\"method\":\"skills/list\",\"skill_names_preview\":[\"review\"]}}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"mcp\",\"summary\":\"mcpServer/listStatus returned 1 entries\",\"method\":\"mcpServer/listStatus\",\"recorded_at_ms\":1714000005400,\"raw_json\":{\"method\":\"mcpServer/listStatus\",\"mcp_server_names_preview\":[\"github\"]}}\n"
+        ),
+    )?;
+
+    let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+    let addr = server
+        .local_url()?
+        .trim_start_matches("http://")
+        .to_string();
+    let handle = thread::spawn(move || server.serve_once());
+
+    let response = send_get_request(
+        &addr,
+        "/api/sessions/observer:codex:1714000005000-77/diagnostics",
+    )?;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "response: {response}"
+    );
+    assert!(response.contains("\"diagnostics\""), "response: {response}");
+    assert!(
+        response.contains("\"prompt_diff_count\":1"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"skill_status\":\"available\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"skill_name\":\"review\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"capability_type\":\"mcp\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"visible_mcp_servers\":[\"github\"]"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"capability_type_count\":2"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("use cargo clippy"),
+        "response: {response}"
+    );
+
+    handle.join().expect("server thread should join")?;
+    fs::remove_dir_all(result.config.state_root)?;
+    Ok(())
+}
+
+#[test]
+fn console_script_prefers_event_detail_api_for_read_model_event_ids() {
+    let script = include_str!("../../assets/console.js");
+
+    assert!(
+        script.contains("const detailApiPathForRequestId"),
+        "console.js should centralize timeline detail route selection"
+    );
+    assert!(
+        script.contains("requestId.startsWith(\"observer:\")"),
+        "observer event ids should use the event detail API"
+    );
+    assert!(
+        script.contains("requestId.startsWith(\"codex-thread:\")"),
+        "codex rollout event ids should use the event detail API"
+    );
+    assert!(
+        script.contains("`/api/events/${requestId}`"),
+        "read model event ids should fetch /api/events/:event_id"
+    );
+    assert!(
+        script.contains("`/api/requests/${requestId}`"),
+        "legacy request ids should keep the /api/requests/:request_id adapter"
+    );
+}
+
+#[test]
+fn console_script_fetches_and_renders_session_capabilities() {
+    let script = include_str!("../../assets/console.js");
+
+    assert!(
+        script.contains("renderCapabilityStrip"),
+        "console.js should render the capability projection strip"
+    );
+    assert!(
+        script.contains("`/api/sessions/${sessionId}/capabilities`"),
+        "session detail loading should fetch session capability projections"
+    );
+    assert!(
+        script.contains("state.sessionCapabilities"),
+        "capabilities should be kept separate from timeline detail state"
+    );
+    assert!(
+        script.contains("[\"agent\", \"app\", \"mcp\", \"plugin\", \"provider\", \"skill\"]"),
+        "console timeline should classify source-specific capability facts as capability snapshots"
+    );
+    assert!(
+        script.contains("mcp: \"hub\""),
+        "console capability strip should render MCP as its own capability type"
+    );
+}
+
+#[test]
+fn console_script_uses_paginated_session_and_timeline_apis() {
+    let script = include_str!("../../assets/console.js");
+
+    assert!(
+        script.contains("SESSION_PAGE_LIMIT"),
+        "console.js should define a bounded session page size"
+    );
+    assert!(
+        script.contains("`/api/sessions?limit=${SESSION_PAGE_LIMIT}`"),
+        "initial session load should use the paginated sessions API"
+    );
+    assert!(
+        script.contains("data-load-more-sessions"),
+        "session list should expose an explicit load-more control"
+    );
+    assert!(
+        script.contains("SESSION_EVENT_PAGE_LIMIT"),
+        "console.js should define a bounded session event page size"
+    );
+    assert!(
+        script.contains("`/api/sessions/${sessionId}/events?limit=${SESSION_EVENT_PAGE_LIMIT}`"),
+        "session detail loading should use the paginated session events API"
+    );
+    assert!(
+        script.contains("data-load-more-session-events"),
+        "timeline should expose an explicit load-more control"
+    );
+}
+
+#[test]
+fn console_script_fetches_and_renders_session_diagnostics() {
+    let script = include_str!("../../assets/console.js");
+    let html = include_str!("../../assets/console.html");
+
+    assert!(
+        html.contains("diagnostics-panel-region"),
+        "console.html should provide an explicit diagnostics panel region"
+    );
+    assert!(
+        script.contains("state.sessionDiagnostics"),
+        "diagnostics should be stored separately from request detail state"
+    );
+    assert!(
+        script.contains("`/api/sessions/${sessionId}/diagnostics`"),
+        "session detail loading should fetch the diagnostics API"
+    );
+    assert!(
+        script.contains("renderDiagnosticsPanel"),
+        "console.js should render an explicit diagnostics panel"
+    );
+    assert!(
+        script.contains("diagnostics.capability_inventory"),
+        "diagnostics panel should read grouped capability inventory"
+    );
+    assert!(
+        script.contains("diagnostics.visible_skills"),
+        "diagnostics panel should keep the existing visible skill summary"
+    );
+    assert!(
+        script.contains("capabilityIcon(type)"),
+        "diagnostics panel should render source-specific capability icons"
+    );
+}
+
+#[test]
+fn console_observer_module_no_longer_owns_legacy_detail_adapters() {
+    let module = include_str!("observer.rs");
+
+    assert!(
+        !module.contains("load_observer_request_detail_payload"),
+        "observer detail payloads should be served by the read model API adapter"
+    );
+    assert!(
+        !module.contains("load_observer_session_detail_payload"),
+        "observer session detail payloads should be served by the read model API adapter"
+    );
+    assert!(
+        !module.contains("load_codex_rollout_request_detail_payload"),
+        "codex rollout detail payloads should be served by the read model API adapter"
+    );
+    assert!(
+        !module.contains("load_codex_rollout_session_detail_payload"),
+        "codex rollout session detail payloads should be served by the read model API adapter"
+    );
+}
+
+#[test]
 fn console_server_returns_observer_session_detail_api_payload() -> io::Result<()> {
     let workspace_root = unique_test_dir();
     let result = bootstrap(&workspace_root)?;
@@ -2360,6 +3102,109 @@ fn console_server_returns_observer_session_detail_api_payload() -> io::Result<()
         "response: {response}"
     );
     assert!(response.contains("Thread started"), "response: {response}");
+
+    handle.join().expect("server thread should join")?;
+    fs::remove_dir_all(result.config.state_root)?;
+    Ok(())
+}
+
+#[test]
+fn console_server_returns_observer_session_events_api_payload() -> io::Result<()> {
+    let workspace_root = unique_test_dir();
+    let result = bootstrap(&workspace_root)?;
+    let observer_dir = result
+        .storage
+        .artifacts_dir
+        .join("observer_events")
+        .join("codex");
+    fs::create_dir_all(&observer_dir)?;
+    fs::write(
+        observer_dir.join("1714000005000-77.jsonl"),
+        concat!(
+            "{\"record_type\":\"handshake\",\"channel\":\"codex-app-server\",\"transport\":\"ipc\",\"server_label\":\"Codex App Server\",\"recorded_at_ms\":1714000005000,\"raw_json\":{}}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"thread\",\"summary\":\"Thread started\",\"method\":\"thread.start\",\"thread_id\":\"thread-1\",\"turn_id\":null,\"item_id\":null,\"timestamp\":\"2026-04-26T10:00:00Z\",\"recorded_at_ms\":1714000005100,\"raw_json\":{\"thread\":\"thread-1\"}}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"tool\",\"summary\":\"Ran shell command\",\"method\":\"shell.exec\",\"thread_id\":\"thread-1\",\"turn_id\":\"turn-1\",\"item_id\":\"item-1\",\"timestamp\":\"2026-04-26T10:00:01Z\",\"recorded_at_ms\":1714000005200,\"raw_json\":{\"tool\":\"exec_command\"}}\n"
+        ),
+    )?;
+
+    let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+    let addr = server
+        .local_url()?
+        .trim_start_matches("http://")
+        .to_string();
+    let handle = thread::spawn(move || server.serve_once());
+
+    let response = send_get_request(
+        &addr,
+        "/api/sessions/observer:codex:1714000005000-77/events?limit=1",
+    )?;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"session_id\":\"observer:codex:1714000005000-77\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"request_id\":\"observer:codex:1714000005000-77:1\""),
+        "response: {response}"
+    );
+    assert!(
+        !response.contains("\"request_id\":\"observer:codex:1714000005000-77:2\""),
+        "response: {response}"
+    );
+    assert!(
+        response.contains("\"next_cursor\":\"1\""),
+        "response: {response}"
+    );
+
+    handle.join().expect("server thread should join")?;
+    fs::remove_dir_all(result.config.state_root)?;
+    Ok(())
+}
+
+#[test]
+fn console_server_sessions_api_keeps_observer_artifacts_out_of_session_list() -> io::Result<()> {
+    let workspace_root = unique_test_dir();
+    let result = bootstrap(&workspace_root)?;
+    let observer_dir = result
+        .storage
+        .artifacts_dir
+        .join("observer_events")
+        .join("codex");
+    fs::create_dir_all(&observer_dir)?;
+    fs::write(
+        observer_dir.join("1714000005000-77.jsonl"),
+        concat!(
+            "{\"record_type\":\"handshake\",\"channel\":\"codex-app-server\",\"transport\":\"ipc\",\"server_label\":\"Codex App Server\",\"recorded_at_ms\":1714000005000,\"raw_json\":{}}\n",
+            "{not-json}\n",
+            "{\"record_type\":\"event\",\"channel\":\"codex-app-server\",\"event_kind\":\"thread\",\"summary\":\"Thread survived malformed line\",\"method\":\"thread.start\",\"thread_id\":\"thread-1\",\"recorded_at_ms\":1714000005100,\"raw_json\":{\"thread\":\"thread-1\"}}\n"
+        ),
+    )?;
+
+    let server = start_console_server_on_bind_addr(&result, "127.0.0.1:0", None)?;
+    let addr = server
+        .local_url()?
+        .trim_start_matches("http://")
+        .to_string();
+    let handle = thread::spawn(move || server.serve_once());
+
+    let response = send_get_request(&addr, "/api/sessions")?;
+
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "response: {response}"
+    );
+    assert!(
+        !response.contains("observer:codex:1714000005000-77"),
+        "response: {response}"
+    );
+    assert!(
+        !response.contains("Thread survived malformed line"),
+        "response: {response}"
+    );
 
     handle.join().expect("server thread should join")?;
     fs::remove_dir_all(result.config.state_root)?;

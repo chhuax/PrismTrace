@@ -473,9 +473,7 @@ mod tests {
         assert_eq!(target.runtime_kind, RuntimeKind::Electron);
     }
 
-    #[test]
     // --- IpcMessage tests ---
-
     #[test]
     fn ipc_message_heartbeat_round_trip() {
         let msg = IpcMessage::Heartbeat {

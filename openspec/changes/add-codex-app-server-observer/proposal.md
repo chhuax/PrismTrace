@@ -15,7 +15,7 @@
 ## What Changes
 
 - 为 `Codex` 新增一条独立于 attach 的官方观测后端接入方案
-- 定义第一版最小事件面：`thread / turn / item / tool / approval / hook / plugin / skill / app`
+- 定义第一版最小事件面：`thread / turn / item / tool / approval / hook / mcp / plugin / skill / app`
 - 先交付最小 CLI/host 验证入口，而不是直接扩展复杂 UI
 - 不重新引入或恢复 legacy attach 路线
 

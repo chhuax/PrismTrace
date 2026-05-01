@@ -81,7 +81,7 @@ CLI 输出先以“摘要 + 持久化”为主，而不是直接绑定控制台 
 - `approval`
 - `hook`
 - `capability_snapshot`
-  - 由 `plugin / skill / app` 组成
+  - 由 `mcp / plugin / skill / app` 组成
 
 每条事件至少包含：
 

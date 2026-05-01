@@ -7,10 +7,10 @@
 术语说明：
 
 - `Codex observer`：PrismTrace 作为 `Codex App Server` 客户端建立的只读观测连接。
-- `capability snapshot`：`plugin / skill / app` 的当前可见性快照。
+- `capability snapshot`：`mcp / plugin / skill / app` 的当前可见性快照。
 - `高层运行时事件`：面向会话、步骤、工具、审批和扩展能力的结构化事件，而非原始 HTTP 报文。
 
-## Requirements
+## ADDED Requirements
 
 ### Requirement: Host 必须提供独立于 attach 的 Codex observer 入口
 
@@ -42,7 +42,7 @@ PrismTrace host MUST 能从 `Codex App Server` 读取高层运行时事件，并
 
 ### Requirement: Host 必须暴露能力可见性快照
 
-PrismTrace host MUST 能通过 `Codex` 官方接口读取并暴露当前 `plugin / skill / app` 能力面，作为解释行为差异的基础上下文。
+PrismTrace host MUST 能通过 `Codex` 官方接口读取并暴露当前 `mcp / plugin / skill / app` 能力面，作为解释行为差异的基础上下文。
 
 #### Scenario: observer 返回 capability snapshot
 

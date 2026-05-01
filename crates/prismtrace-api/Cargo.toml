@@ -1,0 +1,12 @@
+[package]
+name = "prismtrace-api"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+prismtrace-analysis = { path = "../prismtrace-analysis" }
+serde_json = "1"

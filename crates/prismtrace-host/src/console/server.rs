@@ -1,8 +1,15 @@
-use super::{ConsoleSnapshot, ConsoleTargetFilterConfig, write_live_console_response};
+use super::{
+    ConsoleSnapshot, ConsoleTargetFilterConfig, write_console_json_error_response,
+    write_live_console_response,
+};
 use crate::BootstrapResult;
 use std::io;
 use std::io::Write;
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
+use std::thread;
+use std::time::Duration;
+
+const CONSOLE_CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
 pub struct ConsoleServer {
@@ -23,26 +30,96 @@ impl ConsoleServer {
     }
 
     pub fn serve_once(&self) -> io::Result<()> {
-        let (mut stream, _) = self.listener.accept()?;
-        write_live_console_response(
-            &mut stream,
-            &self.result,
-            &self.bind_addr,
-            self.filter.as_ref(),
-        )
+        let (stream, _) = self.listener.accept()?;
+        configure_console_stream(&stream)?;
+        handle_console_connection(stream, &self.result, &self.bind_addr, self.filter.as_ref())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn serve_once_with_timeout_for_test(&self, timeout: Duration) -> io::Result<()> {
+        let (stream, _) = self.listener.accept()?;
+        configure_console_stream_with_timeout(&stream, timeout)?;
+        handle_console_connection(stream, &self.result, &self.bind_addr, self.filter.as_ref())
     }
 
     pub fn serve_forever(&self) -> io::Result<()> {
         loop {
-            let (mut stream, _) = self.listener.accept()?;
-            write_live_console_response(
-                &mut stream,
-                &self.result,
-                &self.bind_addr,
-                self.filter.as_ref(),
-            )?;
+            let (stream, _) = self.listener.accept()?;
+            configure_console_stream(&stream)?;
+            let _ = spawn_console_connection_handler(
+                stream,
+                self.result.clone(),
+                self.bind_addr.clone(),
+                self.filter.clone(),
+            );
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn serve_connections_for_test(&self, connection_count: usize) -> io::Result<()> {
+        let mut handles = Vec::new();
+        for _ in 0..connection_count {
+            let (stream, _) = self.listener.accept()?;
+            configure_console_stream(&stream)?;
+            handles.push(spawn_console_connection_handler(
+                stream,
+                self.result.clone(),
+                self.bind_addr.clone(),
+                self.filter.clone(),
+            ));
+        }
+
+        for handle in handles {
+            handle
+                .join()
+                .map_err(|_| io::Error::other("console connection handler panicked"))??;
+        }
+
+        Ok(())
+    }
+}
+
+fn configure_console_stream(stream: &TcpStream) -> io::Result<()> {
+    configure_console_stream_with_timeout(stream, CONSOLE_CONNECTION_TIMEOUT)
+}
+
+fn configure_console_stream_with_timeout(stream: &TcpStream, timeout: Duration) -> io::Result<()> {
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(CONSOLE_CONNECTION_TIMEOUT))
+}
+
+fn spawn_console_connection_handler(
+    stream: TcpStream,
+    result: BootstrapResult,
+    bind_addr: String,
+    filter: Option<ConsoleTargetFilterConfig>,
+) -> thread::JoinHandle<io::Result<()>> {
+    thread::spawn(move || handle_console_connection(stream, &result, &bind_addr, filter.as_ref()))
+}
+
+fn handle_console_connection(
+    mut stream: TcpStream,
+    result: &BootstrapResult,
+    bind_addr: &str,
+    filter: Option<&ConsoleTargetFilterConfig>,
+) -> io::Result<()> {
+    match write_live_console_response(&mut stream, result, bind_addr, filter) {
+        Ok(()) => Ok(()),
+        Err(error) if is_connection_timeout(&error) => write_console_json_error_response(
+            &mut stream,
+            "HTTP/1.1 408 Request Timeout",
+            "request_timeout",
+            "request was not received before the console connection timeout",
+        ),
+        Err(error) => Err(error),
+    }
+}
+
+fn is_connection_timeout(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    )
 }
 
 pub fn collect_console_snapshot(
@@ -67,7 +144,7 @@ pub(crate) fn collect_console_snapshot_for_bind_addr(
         &super::load_request_summaries(&result.storage).unwrap_or_else(|_| Vec::new()),
         filter,
     );
-    request_summaries.extend(super::load_observer_request_summaries(
+    request_summaries.extend(super::load_read_model_request_summaries(
         &result.storage,
         filter,
     ));
@@ -83,7 +160,7 @@ pub(crate) fn collect_console_snapshot_for_bind_addr(
         Vec::new()
     };
     if include_sessions {
-        session_summaries.extend(super::load_observer_session_summaries(
+        session_summaries.extend(super::load_read_model_session_summaries(
             &result.storage,
             filter,
         ));

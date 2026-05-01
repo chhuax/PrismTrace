@@ -1,6 +1,7 @@
 use super::{
     ConsoleActivityItem, ConsoleFilterContext, ConsoleRequestDetail, ConsoleRequestSummary,
-    ConsoleSessionDetail, ConsoleSessionSummary, ConsoleTargetFilterConfig, ConsoleTargetSummary,
+    ConsoleSessionDetail, ConsoleSessionSummary, ConsoleSessionTimelineItem,
+    ConsoleTargetFilterConfig, ConsoleTargetSummary,
 };
 use prismtrace_core::ProcessTarget;
 use serde_json::{Value, json};
@@ -106,6 +107,8 @@ pub(crate) fn render_targets_payload_from_summaries(
 
     let mut payload = json!({
         "targets": targets,
+        "items": targets,
+        "next_cursor": Value::Null,
         "empty_state": if targets.is_empty() { Some(filtered_empty_state_message(filter_context, "尚无可观测 source")) } else { None::<String> }
     });
     append_filter_context_fields(&mut payload, filter_context);
@@ -133,6 +136,8 @@ pub(crate) fn render_activity_payload_from_items(
 
     let mut payload = json!({
         "activity": activity,
+        "items": activity,
+        "next_cursor": Value::Null,
         "empty_state": if items.is_empty() { Some(filtered_empty_state_message(filter_context, "尚无观测活动")) } else { None::<String> }
     });
     append_filter_context_fields(&mut payload, filter_context);
@@ -159,21 +164,36 @@ pub(crate) fn render_requests_payload(
 
     let mut payload = json!({
         "requests": requests,
+        "items": requests,
+        "next_cursor": Value::Null,
         "empty_state": if requests.is_empty() { Some(filtered_empty_state_message(filter_context, "尚无请求记录")) } else { None::<String> }
     });
     append_filter_context_fields(&mut payload, filter_context);
     payload.to_string()
 }
 
-pub(crate) fn render_sessions_payload(
+pub(crate) fn render_sessions_payload_with_pagination(
     sessions: &[ConsoleSessionSummary],
     filter_context: Option<&ConsoleFilterContext>,
+    pagination: Option<(usize, usize)>,
 ) -> String {
+    let next_cursor = pagination.and_then(|(offset, limit)| {
+        let next = offset.saturating_add(limit);
+        (next < sessions.len()).then(|| next.to_string())
+    });
+    let sessions = match pagination {
+        Some((offset, limit)) => sessions.iter().skip(offset).take(limit).collect::<Vec<_>>(),
+        None => sessions.iter().collect::<Vec<_>>(),
+    };
     let sessions = sessions
         .iter()
         .map(|session| {
             json!({
                 "session_id": session.session_id,
+                "title": session.title,
+                "subtitle": session.subtitle,
+                "cwd": session.cwd,
+                "artifact_path": session.artifact_path,
                 "pid": session.pid,
                 "target_display_name": session.target_display_name,
                 "started_at_ms": session.started_at_ms,
@@ -187,6 +207,8 @@ pub(crate) fn render_sessions_payload(
 
     let mut payload = json!({
         "sessions": sessions,
+        "items": sessions,
+        "next_cursor": next_cursor,
         "empty_state": if sessions.is_empty() { Some(filtered_empty_state_message(filter_context, "尚无会话记录")) } else { None::<String> }
     });
     append_filter_context_fields(&mut payload, filter_context);
@@ -289,24 +311,7 @@ pub(crate) fn render_session_detail_payload(
             let timeline_items = detail
                 .timeline_items
                 .iter()
-                .map(|item| {
-                    json!({
-                        "request_id": item.request_id,
-                        "exchange_id": item.exchange_id,
-                        "pid": item.pid,
-                        "target_display_name": item.target_display_name,
-                        "provider": item.provider,
-                        "model": item.model,
-                        "started_at_ms": item.started_at_ms,
-                        "completed_at_ms": item.completed_at_ms,
-                        "duration_ms": item.duration_ms,
-                        "request_summary": item.request_summary,
-                        "response_status": item.response_status,
-                        "tool_count_final": item.tool_count_final,
-                        "has_response": item.has_response,
-                        "has_tool_visibility": item.has_tool_visibility,
-                    })
-                })
+                .map(console_session_timeline_item_json)
                 .collect::<Vec<_>>();
 
             json!({
@@ -331,6 +336,58 @@ pub(crate) fn render_session_detail_payload(
     };
     append_filter_context_fields(&mut payload, filter_context);
     payload.to_string()
+}
+
+pub(crate) fn render_session_events_payload(
+    session_id: &str,
+    timeline_items: &[ConsoleSessionTimelineItem],
+    filter_context: Option<&ConsoleFilterContext>,
+    pagination: Option<(usize, usize)>,
+) -> String {
+    let next_cursor = pagination.and_then(|(offset, limit)| {
+        let next = offset.saturating_add(limit);
+        (next < timeline_items.len()).then(|| next.to_string())
+    });
+    let items = match pagination {
+        Some((offset, limit)) => timeline_items
+            .iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>(),
+        None => timeline_items.iter().collect::<Vec<_>>(),
+    };
+    let items = items
+        .iter()
+        .map(|item| console_session_timeline_item_json(item))
+        .collect::<Vec<_>>();
+    let mut payload = json!({
+        "session_id": session_id,
+        "items": items,
+        "timeline_items": items,
+        "next_cursor": next_cursor,
+        "empty_state": if items.is_empty() { Some("尚无会话事件") } else { None::<&str> },
+    });
+    append_filter_context_fields(&mut payload, filter_context);
+    payload.to_string()
+}
+
+fn console_session_timeline_item_json(item: &ConsoleSessionTimelineItem) -> Value {
+    json!({
+        "request_id": item.request_id,
+        "exchange_id": item.exchange_id,
+        "pid": item.pid,
+        "target_display_name": item.target_display_name,
+        "provider": item.provider,
+        "model": item.model,
+        "started_at_ms": item.started_at_ms,
+        "completed_at_ms": item.completed_at_ms,
+        "duration_ms": item.duration_ms,
+        "request_summary": item.request_summary,
+        "response_status": item.response_status,
+        "tool_count_final": item.tool_count_final,
+        "has_response": item.has_response,
+        "has_tool_visibility": item.has_tool_visibility,
+    })
 }
 
 pub(crate) fn append_filter_context_fields(
