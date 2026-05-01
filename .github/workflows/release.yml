@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version for manual packaging"
+        description: "Optional release version for manual packaging. Defaults to workspace package version."
         required: false
-        default: "0.1.0-alpha"
+        default: ""
   push:
     tags:
       - "v*"
@@ -48,16 +48,25 @@ jobs:
         id: package
         shell: bash
         run: |
+          target="aarch64-apple-darwin"
+
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
             version="${{ inputs.version }}"
           fi
 
-          scripts/package-release.sh --version "$version" --target aarch64-apple-darwin
+          if [[ -n "$version" ]]; then
+            scripts/package-release.sh --version "$version" --target "$target"
+          else
+            scripts/package-release.sh --target "$target"
+            version="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(pkg["version"] for pkg in data["packages"] if pkg["name"] == "prismtrace-host"))')"
+          fi
 
-          tarball="$(ls target/release-kit/prismtrace-"$version"-*.tar.gz)"
+          tarball="target/release-kit/prismtrace-${version}-${target}.tar.gz"
           checksum="$tarball.sha256"
+          test -f "$tarball"
+          test -f "$checksum"
 
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
           echo "checksum=$checksum" >> "$GITHUB_OUTPUT"

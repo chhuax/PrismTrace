@@ -14,12 +14,28 @@ Options:
   --target <triple>      Target triple. Defaults to the local rustc host triple.
   --dist-dir <dir>       Output directory. Defaults to target/release-kit.
   --binary <path>        Existing prismtrace binary to package.
-  --skip-build           Do not run cargo build; requires --binary or target/release/prismtrace.
+  --skip-build           Do not run cargo build; requires --binary or target/<target>/release/prismtrace.
   -h, --help             Show this help.
 USAGE
 }
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+cd "$repo_root"
+
+require_command() {
+  local command_name="$1"
+  local error_message="$2"
+
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    echo "error: $error_message" >&2
+    exit 1
+  fi
+}
+
 workspace_version() {
+  require_command "python3" "python3 is required to detect the workspace version automatically; install python3 or pass --version explicitly."
+
   cargo metadata --no-deps --format-version 1 \
     | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(pkg["version"] for pkg in data["packages"] if pkg["name"] == "prismtrace-host"))'
 }

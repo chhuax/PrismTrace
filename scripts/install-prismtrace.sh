@@ -53,6 +53,26 @@ if [[ ! -f "$source_bin" ]]; then
   exit 1
 fi
 
+if [[ -e "$target_dir" ]]; then
+  if [[ ! -w "$target_dir" ]]; then
+    echo "error: install destination is not writable: $target_dir" >&2
+    echo 'hint: rerun with --prefix "$HOME/.local" or PREFIX="$HOME/.local", or use sudo for a system-wide install.' >&2
+    exit 1
+  fi
+else
+  if [[ -d "$prefix" ]]; then
+    writable_check_path="$prefix"
+  else
+    writable_check_path="$(dirname "$prefix")"
+  fi
+
+  if [[ ! -w "$writable_check_path" ]]; then
+    echo "error: cannot create install destination under $prefix (not writable: $writable_check_path)" >&2
+    echo 'hint: rerun with --prefix "$HOME/.local" or PREFIX="$HOME/.local", or use sudo for a system-wide install.' >&2
+    exit 1
+  fi
+fi
+
 mkdir -p "$target_dir"
 install -m 0755 "$source_bin" "$target_bin"
 
