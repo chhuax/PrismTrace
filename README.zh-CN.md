@@ -29,6 +29,44 @@ PrismTrace V1 当前边界是：
 - 先解决 payload 可见性
 - 采用本地优先的存储与隐私策略
 
+## Alpha 安装
+
+PrismTrace alpha 版本以未签名的 macOS tarball 分发。第一版 release kit 面向 Apple Silicon macOS（`aarch64-apple-darwin`）。Homebrew、`.pkg`、`.dmg`、codesign 和 notarization 暂未提供。
+
+从 GitHub Releases 下载最新的 `prismtrace-*-aarch64-apple-darwin.tar.gz`，然后安装：
+
+```bash
+tar -xzf prismtrace-*-aarch64-apple-darwin.tar.gz
+cd prismtrace-*-aarch64-apple-darwin
+./install.sh --prefix "$HOME/.local"
+```
+
+确认安装目录已经在 `PATH` 中：
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+安装后可以先运行 discovery smoke test：
+
+```bash
+prismtrace --discover
+```
+
+启动本地控制台：
+
+```bash
+prismtrace --console
+```
+
+observer 入口也通过同一个安装命令暴露：
+
+```bash
+prismtrace --codex-observe
+prismtrace --claude-observe
+prismtrace --opencode-observe
+```
+
 ## 长期方向
 
 PrismTrace 不只是一个 payload 抓取工具，它的长期方向是完整的 AI 应用可观测性：
@@ -52,6 +90,7 @@ PrismTrace 不只是一个 payload 抓取工具，它的长期方向是完整的
 cargo test
 cargo run -p prismtrace-host
 cargo run -p prismtrace-host -- --discover
+cargo run -p prismtrace-host --bin prismtrace -- --discover
 cargo run -p prismtrace-host -- --readiness
 cargo run -p prismtrace-host -- --attach <pid>
 ```
@@ -64,6 +103,7 @@ cargo run -p prismtrace-host -- --attach <pid>
 
 ```bash
 cargo run -p prismtrace-host -- --console
+cargo run -p prismtrace-host --bin prismtrace -- --console
 ```
 
 如果只想看特定目标，可以重复传入 `--target`：

@@ -1,0 +1,89 @@
+name: Release Kit
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version for manual packaging"
+        required: false
+        default: "0.1.0-alpha"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  macos-release:
+    name: macOS Release Kit
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: aarch64-apple-darwin
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace
+
+      - name: Run host discovery smoke test
+        run: cargo run -p prismtrace-host -- --discover
+
+      - name: Run release kit smoke test
+        run: scripts/test-release-kit.sh
+
+      - name: Package release archive
+        id: package
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${{ inputs.version }}"
+          fi
+
+          scripts/package-release.sh --version "$version" --target aarch64-apple-darwin
+
+          tarball="$(ls target/release-kit/prismtrace-"$version"-*.tar.gz)"
+          checksum="$tarball.sha256"
+
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prismtrace-release-kit
+          path: |
+            ${{ steps.package.outputs.tarball }}
+            ${{ steps.package.outputs.checksum }}
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          tarball="${{ steps.package.outputs.tarball }}"
+          checksum="${{ steps.package.outputs.checksum }}"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$tarball" "$checksum" --clobber
+          else
+            gh release create "$tag" "$tarball" "$checksum" \
+              --title "$tag" \
+              --notes "PrismTrace macOS alpha release kit."
+          fi
