@@ -1,3 +1,8 @@
+pub use prismtrace_sources::{
+    ObservedEvent, ObservedEventKind, ObserverArtifactSource, ObserverArtifactWriter,
+    ObserverChannelKind, ObserverHandshake, ObserverSession, ObserverSource, ObserverSourceFactory,
+};
+
 pub mod claude {
     pub use crate::claude_observer::{
         ClaudeObserverOptions, default_transcript_root, run_claude_observer,

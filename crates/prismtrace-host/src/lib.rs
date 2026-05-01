@@ -107,6 +107,29 @@ mod tests {
     }
 
     #[test]
+    fn source_contracts_live_in_prismtrace_sources_crate() -> io::Result<()> {
+        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("host crate should have a parent")
+            .parent()
+            .expect("crates directory should have a parent")
+            .to_path_buf();
+        let sources_lib =
+            fs::read_to_string(workspace.join("crates/prismtrace-sources/src/lib.rs"))?;
+        let host_observer =
+            fs::read_to_string(workspace.join("crates/prismtrace-host/src/observer.rs"))?;
+        let host_ingest =
+            fs::read_to_string(workspace.join("crates/prismtrace-host/src/ingest.rs"))?;
+
+        assert!(sources_lib.contains("pub trait ObserverSource"));
+        assert!(sources_lib.contains("pub struct ObserverArtifactWriter"));
+        assert!(!host_observer.contains(concat!("pub trait ", "ObserverSource")));
+        assert!(!host_ingest.contains(concat!("pub struct ", "ObserverArtifactWriter")));
+
+        Ok(())
+    }
+
+    #[test]
     fn collect_console_snapshot_exposes_local_console_url() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = crate::bootstrap(&workspace_root)?;

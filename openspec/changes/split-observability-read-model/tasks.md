@@ -82,6 +82,9 @@
 
 ## 9. 阶段 8 Crate 边界收敛
 
+- [x] 9.0 拆出 `prismtrace-sources`
+  - 验证：source/observer 共享 contract 与 observer artifact writer 迁入 `crates/prismtrace-sources`；host 保留兼容 re-export，Codex / Claude / opencode observer 直接消费 `prismtrace_sources`
+
 - [x] 9.1 拆出 `prismtrace-index`
   - 验证：index projection / manifest / JSONL persistence 迁入 `crates/prismtrace-index`；`prismtrace-storage` 只保留目录布局并兼容 re-export；host 直接依赖 `prismtrace_index` 的 index 类型
 

@@ -1,7 +1,6 @@
-use crate::ingest::{ObserverArtifactSource, ObserverArtifactWriter};
-use crate::observer::{
-    ObservedEvent, ObservedEventKind, ObserverChannelKind, ObserverHandshake, ObserverSession,
-    ObserverSource, ObserverSourceFactory,
+use prismtrace_sources::{
+    ObservedEvent, ObservedEventKind, ObserverArtifactSource, ObserverArtifactWriter,
+    ObserverChannelKind, ObserverHandshake, ObserverSession, ObserverSource, ObserverSourceFactory,
 };
 use prismtrace_storage::StorageLayout;
 use serde_json::{Value, json};
@@ -663,9 +662,9 @@ mod tests {
         ClaudeObserverOptions, ClaudeObserverSession, default_transcript_root,
         discover_transcript_files, normalize_transcript_record, run_claude_observer,
     };
-    use crate::ingest::{ObserverArtifactSource, ObserverArtifactWriter};
-    use crate::observer::{
-        ObservedEvent, ObservedEventKind, ObserverChannelKind, ObserverHandshake, ObserverSession,
+    use prismtrace_sources::{
+        ObservedEvent, ObservedEventKind, ObserverArtifactSource, ObserverArtifactWriter,
+        ObserverChannelKind, ObserverHandshake, ObserverSession,
     };
     use serde_json::json;
     use std::fs;

@@ -4,6 +4,7 @@ members = [
     "crates/prismtrace-analysis",
     "crates/prismtrace-api",
     "crates/prismtrace-index",
+    "crates/prismtrace-sources",
     "crates/prismtrace-storage",
     "crates/prismtrace-host",
 ]

@@ -1,7 +1,6 @@
-use crate::ingest::{ObserverArtifactSource, ObserverArtifactWriter};
-use crate::observer::{
-    ObservedEvent, ObservedEventKind, ObserverChannelKind, ObserverHandshake, ObserverSession,
-    ObserverSource, ObserverSourceFactory,
+use prismtrace_sources::{
+    ObservedEvent, ObservedEventKind, ObserverArtifactSource, ObserverArtifactWriter,
+    ObserverChannelKind, ObserverHandshake, ObserverSession, ObserverSource, ObserverSourceFactory,
 };
 use prismtrace_storage::StorageLayout;
 use serde_json::{Value, json};
@@ -1033,9 +1032,9 @@ mod tests {
         discover_latest_codex_socket, normalize_server_value, observed_event_kind_for_method,
         select_latest_desktop_codex_socket,
     };
-    use crate::ingest::{ObserverArtifactSource, ObserverArtifactWriter};
-    use crate::observer::{
-        ObservedEvent, ObserverChannelKind, ObserverHandshake, ObserverSourceFactory,
+    use prismtrace_sources::{
+        ObservedEvent, ObserverArtifactSource, ObserverArtifactWriter, ObserverChannelKind,
+        ObserverHandshake, ObserverSourceFactory,
     };
     use prismtrace_storage::StorageLayout;
     use serde_json::{Value, json};
@@ -1352,7 +1351,7 @@ mod tests {
             }
         })])?;
 
-        let error = crate::observer::ObserverSession::initialize(&mut session)
+        let error = prismtrace_sources::ObserverSession::initialize(&mut session)
             .expect_err("initialize should fail");
 
         assert!(
@@ -1392,7 +1391,7 @@ mod tests {
             }),
         ])?;
 
-        let events = crate::observer::ObserverSession::collect_capability_events(&mut session)?;
+        let events = prismtrace_sources::ObserverSession::collect_capability_events(&mut session)?;
 
         assert_eq!(events.len(), 4);
         assert_eq!(events[0].event_kind, ObservedEventKind::Unknown);

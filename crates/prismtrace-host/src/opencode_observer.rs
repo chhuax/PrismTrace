@@ -1,7 +1,6 @@
-use crate::ingest::{ObserverArtifactSource, ObserverArtifactWriter};
-use crate::observer::{
-    ObservedEvent, ObservedEventKind, ObserverChannelKind, ObserverHandshake, ObserverSession,
-    ObserverSource, ObserverSourceFactory,
+use prismtrace_sources::{
+    ObservedEvent, ObservedEventKind, ObserverArtifactSource, ObserverArtifactWriter,
+    ObserverChannelKind, ObserverHandshake, ObserverSession, ObserverSource, ObserverSourceFactory,
 };
 use prismtrace_storage::StorageLayout;
 use serde_json::{Value, json};
@@ -691,9 +690,9 @@ pub(crate) fn spawn_test_opencode_server() -> io::Result<TestOpencodeServer> {
 #[cfg(test)]
 mod tests {
     use super::{OpencodeObserverOptions, spawn_test_opencode_server, truncate};
-    use crate::ingest::{ObserverArtifactSource, ObserverArtifactWriter};
-    use crate::observer::{
-        ObservedEvent, ObservedEventKind, ObserverChannelKind, ObserverHandshake,
+    use prismtrace_sources::{
+        ObservedEvent, ObservedEventKind, ObserverArtifactSource, ObserverArtifactWriter,
+        ObserverChannelKind, ObserverHandshake,
     };
     use serde_json::json;
     use std::io;

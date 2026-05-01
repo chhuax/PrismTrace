@@ -278,7 +278,11 @@ sources -> ingest -> index -> analysis -> api -> console
 
 目标：当 host 内模块边界稳定后，再拆成独立 crate。
 
-- [ ] 8.1 拆 `prismtrace-sources`
+- [x] 8.1 拆 `prismtrace-sources`
+  - 范围：先拆 source/observer 共享 contract 与 observer artifact writer，不移动 Codex / Claude / opencode 的具体 observer 实现
+  - 结果：新增 `crates/prismtrace-sources`，承载 `ObserverSource` / `ObserverSession` / `ObservedEvent` / `ObserverArtifactWriter` 等类型；host 内 `observer.rs` / `ingest.rs` 缩为兼容 re-export，Codex / Claude / opencode observer 直接消费 `prismtrace_sources`
+  - 验证：`cargo test -p prismtrace-sources observer_ -- --nocapture`、`cargo test -p prismtrace-host source_contracts_live_in_prismtrace_sources_crate -- --nocapture`、`cargo test -p prismtrace-host lifecycle::tests::run_opencode_observer_session_passes_storage_to_artifact_writer -- --nocapture`
+  - 底层接入说明：这一步不是 opencode / Codex 底层采集统一；它只是把已有 observer-first source 边界从 host 拆出。底层 parity 仍需要在 source 协议层单独定义并补齐 facts
 - [x] 8.2 拆 `prismtrace-index`
   - 范围：先拆 index projection / manifest / JSONL persistence 类型与逻辑，不移动 host 内依赖 read model 的 read/write store orchestration
   - 结果：新增 `crates/prismtrace-index`，`prismtrace-storage` 收缩为目录布局并通过 re-export 保持兼容；host 内直接使用 `prismtrace_index` 的 index 类型

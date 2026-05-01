@@ -372,6 +372,7 @@ dependencies = [
  "prismtrace-api",
  "prismtrace-core",
  "prismtrace-index",
+ "prismtrace-sources",
  "prismtrace-storage",
  "serde_json",
  "tungstenite",
@@ -383,6 +384,14 @@ name = "prismtrace-index"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "prismtrace-sources"
+version = "0.1.0"
+dependencies = [
+ "prismtrace-storage",
  "serde_json",
 ]
 
