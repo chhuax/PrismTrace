@@ -1,0 +1,56 @@
+:root {
+  color-scheme: dark;
+}
+
+body.console-app {
+  background: #0e0e10;
+  color: #f8f8ff;
+}
+
+.console-topbar {
+  background: #0e0e10;
+  border-bottom-color: rgba(63, 72, 90, 0.22);
+}
+
+.console-brand-logo {
+  color: #f8f8ff;
+}
+
+.console-sidebar {
+  background: #1a1a1c;
+  border-right-color: rgba(63, 72, 90, 0.22);
+}
+
+.console-main {
+  background: #0e0e10;
+}
+
+.console-canvas {
+  background: #0e0e10;
+  border-right-color: rgba(63, 72, 90, 0.22);
+}
+
+.console-rightbar {
+  background: #1a1a1c;
+  border-left-color: rgba(63, 72, 90, 0.22);
+}
+
+.console-nav-button {
+  color: #989eac;
+}
+
+.console-nav-button:hover {
+  background: rgba(63, 72, 90, 0.24);
+  color: #f8f8ff;
+}
+
+.console-nav-button.is-active {
+  background: #0e0e10;
+  color: #0066cc;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+}
+
+.theme-button-active {
+  background: #00468c;
+  color: #b9d1ff;
+}

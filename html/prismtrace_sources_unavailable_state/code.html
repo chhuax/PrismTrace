@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PrismTrace - Sources Unavailable</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "inverse-primary": "#005EB8",
+                        "inverse-surface": "#F9F9FF",
+                        "primary-fixed-dim": "#C0D5FF",
+                        "on-surface-variant": "#A2ABC1",
+                        "tertiary-dim": "#CBC9E9",
+                        "surface-bright": "#212C40",
+                        "on-primary": "#003F80",
+                        "surface": "#0B0E14",
+                        "outline-variant": "#3F485A",
+                        "primary-container": "#00468C",
+                        "on-tertiary": "#53526E",
+                        "primary-fixed": "#D6E3FF",
+                        "secondary-fixed": "#DDE2F2",
+                        "on-tertiary-container": "#4B4A65",
+                        "surface-container-high": "#18202E",
+                        "surface-container-highest": "#1D2637",
+                        "on-tertiary-fixed": "#383751",
+                        "on-primary-fixed": "#003E7E",
+                        "tertiary-fixed-dim": "#CBC9E9",
+                        "secondary-container": "#363C48",
+                        "on-secondary": "#1A202C",
+                        "background": "#0B0E14",
+                        "tertiary": "#E8E5FF",
+                        "surface-container-lowest": "#000000",
+                        "secondary-fixed-dim": "#CFD4E4",
+                        "on-background": "#DCE5FD",
+                        "on-error": "#490106",
+                        "on-secondary-container": "#BABFCE",
+                        "error-dim": "#BB5551",
+                        "on-primary-fixed-variant": "#005AB2",
+                        "tertiary-fixed": "#D9D7F8",
+                        "primary": "#A9C7FF",
+                        "on-secondary-fixed": "#393F4C",
+                        "on-secondary-fixed-variant": "#565C69",
+                        "surface-dim": "#0B0E14",
+                        "surface-tint": "#A9C7FF",
+                        "inverse-on-surface": "#52555C",
+                        "tertiary-container": "#D9D7F8",
+                        "surface-variant": "#1D2637",
+                        "on-error-container": "#FF9993",
+                        "secondary": "#989EAC",
+                        "outline": "#6C768A",
+                        "secondary-dim": "#989EAC",
+                        "on-tertiary-fixed-variant": "#54536F",
+                        "surface-container-low": "#0F131C",
+                        "on-surface": "#DCE5FD",
+                        "primary-dim": "#92BAFF",
+                        "surface-container": "#141A25",
+                        "error-container": "#7F2927",
+                        "on-primary-container": "#B9D1FF",
+                        "error": "#EE7D77"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter"],
+                        "display": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Inter"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { background-color: #0B0E14; color: #DCE5FD; font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-background text-on-background h-screen flex flex-col overflow-hidden">
+<!-- TopAppBar -->
+<header class="bg-[#0B0E14] backdrop-blur-xl bg-opacity-90 shadow-sm transition-colors duration-150 ease-in-out fixed top-0 w-full z-50 flex justify-between items-center px-4 h-12 border-b border-[#3F485A]/30">
+<div class="flex items-center gap-4">
+<span class="text-lg font-bold tracking-tighter text-[#DCE5FD] font-['Inter'] tracking-tight">PrismTrace</span>
+</div>
+<div class="flex-1 flex justify-start pl-8">
+<div class="relative w-64">
+<span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-secondary text-sm">search</span>
+<input class="w-full bg-surface-container-low border border-outline-variant/30 rounded text-sm text-on-surface py-1 pl-8 pr-2 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all" placeholder="Search..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-secondary hover:text-on-background cursor-pointer text-sm transition-colors">settings</span>
+<span class="material-symbols-outlined text-secondary hover:text-on-background cursor-pointer text-sm transition-colors">notifications</span>
+<span class="material-symbols-outlined text-secondary hover:text-on-background cursor-pointer text-sm transition-colors">account_tree</span>
+<div class="h-6 w-6 rounded-full bg-surface-container-high border border-outline-variant/30 flex items-center justify-center overflow-hidden ml-2">
+<img alt="User profile" class="w-full h-full object-cover" data-alt="close up professional headshot of a person with neutral lighting and dark background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuARNB5Tlj5iKMw389kNIgW0UR4g2nEHDOgOUAYuPuV3b0NUWkC9x3OGa8Bw2dcPHyA7pophd-2Ha-QwXNRn57RjvgzLL6fl6sHLW1lb-MQifFGjYo-44Rrg643xwfIEdkvfbrIU0Lx-tLGnmtI_YK-x3LoJdVmgDC4Wjv1ugV0Agz8C99WAephovyXImNMeaU1o6Xc1hoynhbJOR32xYUbARCxF6O2z9lEN9oXZYGyoPrZjAOiqfa94g0JQWXzjB7gB5lOgbQq-6uE"/>
+</div>
+</div>
+</header>
+<!-- Main Content Layout -->
+<div class="flex flex-1 pt-12 overflow-hidden h-full">
+<!-- SideNavBar -->
+<nav class="bg-[#18202E] transition-all duration-200 fixed left-0 top-12 bottom-0 flex flex-col pt-4 border-r border-[#3F485A]/30 w-64 z-40">
+<div class="px-4 mb-4">
+<h2 class="text-[#DCE5FD] font-bold text-xs mb-1">MODULES</h2>
+<p class="text-secondary text-[10px] font-mono tracking-[0.1em] uppercase">v2.4.0-stable</p>
+</div>
+<div class="flex-1 overflow-y-auto">
+<ul class="space-y-0.5">
+<li>
+<a class="flex items-center px-4 py-2 bg-[#5E9EFF]/5 text-[#5E9EFF] border-l-2 border-[#5E9EFF] hover:bg-[#5E9EFF]/5 hover:text-[#DCE5FD]" href="#">
+<span class="material-symbols-outlined mr-3 text-sm" style="font-variation-settings: 'FILL' 1;">database</span>
+<span class="text-sm font-medium">Sources</span>
+</a>
+</li>
+<li>
+<a class="flex items-center px-4 py-2 text-[#989EAC] border-l-2 border-transparent hover:bg-[#5E9EFF]/5 hover:text-[#DCE5FD]" href="#">
+<span class="material-symbols-outlined mr-3 text-sm">timeline</span>
+<span class="text-sm font-medium">Traces</span>
+</a>
+</li>
+<li>
+<a class="flex items-center px-4 py-2 text-[#989EAC] border-l-2 border-transparent hover:bg-[#5E9EFF]/5 hover:text-[#DCE5FD]" href="#">
+<span class="material-symbols-outlined mr-3 text-sm">query_stats</span>
+<span class="text-sm font-medium">Metrics</span>
+</a>
+</li>
+<li>
+<a class="flex items-center px-4 py-2 text-[#989EAC] border-l-2 border-transparent hover:bg-[#5E9EFF]/5 hover:text-[#DCE5FD]" href="#">
+<span class="material-symbols-outlined mr-3 text-sm">subject</span>
+<span class="text-sm font-medium">Logs</span>
+</a>
+</li>
+<li>
+<a class="flex items-center px-4 py-2 text-[#989EAC] border-l-2 border-transparent hover:bg-[#5E9EFF]/5 hover:text-[#DCE5FD]" href="#">
+<span class="material-symbols-outlined mr-3 text-sm">warning</span>
+<span class="text-sm font-medium">Alerts</span>
+</a>
+</li>
+<li>
+<a class="flex items-center px-4 py-2 text-[#989EAC] border-l-2 border-transparent hover:bg-[#5E9EFF]/5 hover:text-[#DCE5FD]" href="#">
+<span class="material-symbols-outlined mr-3 text-sm">hub</span>
+<span class="text-sm font-medium">Network</span>
+</a>
+</li>
+</ul>
+<div class="px-4 mt-6 mb-2 text-xs font-mono text-secondary uppercase tracking-[0.1em]">ACTIVE SOURCES</div>
+<ul class="space-y-0.5">
+<li>
+<a class="flex flex-col px-4 py-2 hover:bg-primary/5 border-l-2 border-transparent" href="#">
+<div class="flex items-center justify-between w-full">
+<span class="text-xs font-medium text-on-background">Codex App Server</span>
+<div class="w-1.5 h-1.5 rounded-full bg-error ml-2 shadow-[0_0_4px_rgba(238,125,119,0.8)]"></div>
+</div>
+<div class="text-[10px] font-mono text-error mt-0.5">Connection Lost (4m ago)</div>
+</a>
+</li>
+<li>
+<a class="flex flex-col px-4 py-2 hover:bg-primary/5 border-l-2 border-transparent" href="#">
+<div class="flex items-center justify-between w-full">
+<span class="text-xs font-medium text-secondary">opencode</span>
+<div class="w-1.5 h-1.5 rounded-full bg-green-400 ml-2 shadow-[0_0_4px_rgba(74,222,128,0.5)]"></div>
+</div>
+<div class="text-[10px] font-mono text-secondary mt-0.5">Active - 1.2k msgs/s</div>
+</a>
+</li>
+</ul>
+</div>
+<div class="px-4 py-3">
+<button class="w-full bg-surface-container border border-outline-variant/30 text-primary hover:bg-primary/10 font-['JetBrains_Mono'] text-[10px] uppercase tracking-[0.1em] py-1.5 rounded transition-colors duration-200 text-center flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-xs">add</span>
+                    DEPLOY NEW SOURCE
+                </button>
+</div>
+<div class="mt-auto border-t border-[#3F485A]/30">
+<ul class="py-2">
+<li>
+<a class="flex items-center px-4 py-1.5 text-[#989EAC] hover:text-[#DCE5FD] hover:bg-[#5E9EFF]/5 transition-colors" href="#">
+<span class="material-symbols-outlined mr-3 text-sm">menu_book</span>
+<span class="text-xs">Documentation</span>
+</a>
+</li>
+<li>
+<a class="flex items-center px-4 py-1.5 text-[#989EAC] hover:text-[#DCE5FD] hover:bg-[#5E9EFF]/5 transition-colors" href="#">
+<span class="material-symbols-outlined mr-3 text-sm">contact_support</span>
+<span class="text-xs">Support</span>
+</a>
+</li>
+</ul>
+</div>
+</nav>
+<!-- Content Area -->
+<main class="ml-64 flex-1 flex h-full overflow-hidden">
+<!-- Center Column: Unavailable State -->
+<div class="flex-1 flex flex-col min-w-0 border-r border-outline-variant/30 bg-surface">
+<!-- Center Header -->
+<div class="h-10 border-b border-outline-variant/30 flex items-center px-4 bg-surface-container-low shrink-0 justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary text-sm">warning</span>
+<h2 class="text-xs font-mono uppercase tracking-[0.1em] text-secondary">Unified Telemetry Feed</h2>
+</div>
+</div>
+<!-- Empty/Degraded State Container -->
+<div class="flex-1 flex items-center justify-center p-8 bg-surface-container-lowest overflow-y-auto">
+<div class="max-w-md w-full flex flex-col items-center text-center">
+<div class="w-16 h-16 rounded-full bg-error-container/20 border border-error/30 flex items-center justify-center mb-6 shadow-[inset_0_0_20px_rgba(238,125,119,0.1)]">
+<span class="material-symbols-outlined text-error text-3xl">wifi_off</span>
+</div>
+<h3 class="text-lg font-bold text-on-background mb-2">Source Connection Unavailable</h3>
+<p class="text-sm text-secondary mb-6 leading-relaxed">
+                            The observer connection to <span class="font-mono text-xs text-on-surface bg-surface-container px-1 py-0.5 rounded border border-outline-variant/30">Codex App Server</span> is currently unreachable or unstable. Telemetry data cannot be streamed at this time.
+                        </p>
+<div class="flex items-center gap-3 w-full justify-center">
+<button class="bg-primary text-surface font-medium text-xs px-4 py-2 rounded-sm hover:bg-primary-dim transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">refresh</span>
+                                Retry Connection
+                            </button>
+<button class="bg-surface-container border border-outline-variant/40 text-on-surface font-medium text-xs px-4 py-2 rounded-sm hover:bg-surface-container-high transition-colors shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)] flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">receipt_long</span>
+                                View Connection Logs
+                            </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column: Inspector -->
+<aside class="w-80 bg-surface-container-high shrink-0 flex flex-col overflow-y-auto z-10 border-l border-outline-variant/30 shadow-[-4px_0_15px_rgba(0,0,0,0.2)]">
+<div class="h-10 border-b border-outline-variant/30 flex items-center px-4 bg-surface-container-highest shrink-0 sticky top-0">
+<h2 class="text-xs font-mono uppercase tracking-[0.1em] text-on-background">Inspector</h2>
+</div>
+<div class="p-4 space-y-6">
+<!-- Meta Header -->
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="material-symbols-outlined text-secondary text-lg">dns</span>
+<h3 class="text-sm font-semibold text-on-background">Codex App Server</h3>
+</div>
+<div class="flex items-center gap-2 text-xs font-mono">
+<div class="w-1.5 h-1.5 rounded-full bg-error"></div>
+<span class="text-error">Connection Lost</span>
+</div>
+</div>
+<!-- Details Box -->
+<div class="bg-surface-container-lowest border border-outline-variant/30 rounded p-3 space-y-3 shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]">
+<div class="flex justify-between items-start border-b border-outline-variant/30 pb-2 mb-2 last:border-0 last:pb-0 last:mb-0">
+<span class="text-[10px] font-mono uppercase text-secondary tracking-[0.1em]">Type</span>
+<span class="text-xs font-mono text-on-background text-right">Application Server<br/>(Node.js)</span>
+</div>
+<div class="flex justify-between items-center border-b border-outline-variant/30 pb-2 mb-2 last:border-0 last:pb-0 last:mb-0">
+<span class="text-[10px] font-mono uppercase text-secondary tracking-[0.1em]">Last Seen</span>
+<span class="text-xs font-mono text-on-background">14:02:45 UTC</span>
+</div>
+<div class="flex flex-col border-b border-outline-variant/30 pb-2 mb-2 last:border-0 last:pb-0 last:mb-0 gap-1 mt-1">
+<span class="text-[10px] font-mono uppercase text-secondary tracking-[0.1em]">Recent Error</span>
+<span class="text-xs font-mono text-error bg-error-container/20 px-2 py-1 rounded border border-error/20 w-fit">ECONNREFUSED</span>
+</div>
+<div class="flex justify-between items-center border-b border-outline-variant/30 pb-2 mb-2 last:border-0 last:pb-0 last:mb-0">
+<span class="text-[10px] font-mono uppercase text-secondary tracking-[0.1em]">Known Sessions</span>
+<span class="text-xs font-mono text-on-background">24 (active before drop)</span>
+</div>
+</div>
+<!-- Actions -->
+<div class="space-y-2">
+<h4 class="text-[10px] font-mono uppercase text-secondary tracking-[0.1em] mb-2">Diagnostic Actions</h4>
+<button class="w-full text-left px-3 py-2 text-xs text-on-surface hover:bg-primary/5 hover:text-primary transition-colors flex items-center gap-2 rounded border border-transparent hover:border-primary/20">
+<span class="material-symbols-outlined text-sm">terminal</span>
+                            Open Diagnostic Shell
+                        </button>
+<button class="w-full text-left px-3 py-2 text-xs text-on-surface hover:bg-primary/5 hover:text-primary transition-colors flex items-center gap-2 rounded border border-transparent hover:border-primary/20">
+<span class="material-symbols-outlined text-sm">history</span>
+                            View Connection History
+                        </button>
+</div>
+</div>
+</aside>
+</main>
+</div>
+</body></html>

@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PrismTrace - Observer Console</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-bright": "#fcf8fb",
+                      "tertiary": "#5e5c78",
+                      "on-primary-fixed-variant": "#005ab4",
+                      "error-dim": "#4e0309",
+                      "surface-container-low": "#f5f3f6",
+                      "primary": "#005cba",
+                      "on-primary": "#f7f7ff",
+                      "primary-fixed": "#d7e3ff",
+                      "surface-container-high": "#e9e7ed",
+                      "on-secondary-fixed": "#3d3f45",
+                      "error": "#9f403d",
+                      "on-secondary-container": "#505257",
+                      "on-background": "#313238",
+                      "secondary-container": "#e2e2e9",
+                      "primary-fixed-dim": "#c1d5ff",
+                      "surface-tint": "#005cba",
+                      "surface-container-lowest": "#ffffff",
+                      "on-error": "#fff7f6",
+                      "secondary-fixed-dim": "#d4d4db",
+                      "tertiary-dim": "#52506b",
+                      "on-secondary-fixed-variant": "#5a5b61",
+                      "surface": "#fcf8fb",
+                      "tertiary-fixed-dim": "#c9c6e6",
+                      "on-tertiary-fixed-variant": "#53526d",
+                      "primary-dim": "#0051a4",
+                      "tertiary-container": "#d7d4f5",
+                      "inverse-primary": "#5095fe",
+                      "on-primary-container": "#0050a2",
+                      "on-error-container": "#752121",
+                      "on-surface-variant": "#5e5f65",
+                      "surface-container-highest": "#e3e2e9",
+                      "on-surface": "#313238",
+                      "secondary-fixed": "#e2e2e9",
+                      "secondary-dim": "#515359",
+                      "background": "#fcf8fb",
+                      "outline-variant": "#b2b1b8",
+                      "error-container": "#fe8983",
+                      "outline": "#7a7a80",
+                      "surface-container": "#efedf2",
+                      "on-tertiary-container": "#494863",
+                      "primary-container": "#d7e3ff",
+                      "surface-variant": "#e3e2e9",
+                      "surface-dim": "#dad9e1",
+                      "inverse-surface": "#0e0e10",
+                      "on-tertiary": "#fbf7ff",
+                      "on-secondary": "#f8f8ff",
+                      "on-tertiary-fixed": "#36354f",
+                      "inverse-on-surface": "#9e9c9f",
+                      "on-primary-fixed": "#003e80",
+                      "secondary": "#5d5f65",
+                      "tertiary-fixed": "#d7d4f5"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "fontFamily": {
+                      "headline": ["Inter", "sans-serif"],
+                      "display": ["Inter", "sans-serif"],
+                      "body": ["Inter", "sans-serif"],
+                      "label": ["Inter", "sans-serif"],
+                      "mono": ["Roboto Mono", "monospace"]
+              }
+            }
+          }
+        }
+      </script>
+<style>
+        .mac-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .mac-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .mac-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(122, 122, 128, 0.2); border-radius: 10px; }
+        .mac-scrollbar:hover::-webkit-scrollbar-thumb { background-color: rgba(122, 122, 128, 0.4); }
+      </style>
+</head>
+<body class="bg-surface text-on-surface font-body h-screen w-full flex overflow-hidden antialiased selection:bg-primary-container selection:text-on-primary-container">
+<!-- JSON Component: SideNavBar -->
+<nav class="h-screen w-64 shrink-0 bg-slate-100 dark:bg-slate-950 flex flex-col py-4 px-3 gap-y-2 border-r border-slate-200 dark:border-slate-800 z-10 relative">
+<!-- Header -->
+<div class="mb-6 px-2">
+<h1 class="text-sm font-black text-slate-800 dark:text-slate-200 tracking-tight">Observer</h1>
+<p class="font-['Inter'] text-xs uppercase tracking-widest font-medium text-slate-500 mt-1">Precision Console</p>
+</div>
+<!-- Main Nav -->
+<div class="flex flex-col gap-y-1 flex-1">
+<!-- Inactive Tab -->
+<button class="flex items-center gap-3 px-3 py-2 rounded-md w-full text-left font-['Inter'] text-xs uppercase tracking-widest font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 scale-98-on-click duration-200 transition-all">
+<span class="material-symbols-outlined text-[18px]">database</span>
+<span>Sources</span>
+</button>
+<!-- Active Tab -->
+<button class="flex items-center gap-3 px-3 py-2 w-full text-left font-['Inter'] text-xs uppercase tracking-widest font-medium scale-98-on-click duration-200 transition-all bg-white dark:bg-slate-900 text-[#0066CC] shadow-sm rounded-md">
+<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">pulse_alert</span>
+<span>Activity</span>
+</button>
+<!-- Inactive Tab -->
+<button class="flex items-center gap-3 px-3 py-2 rounded-md w-full text-left font-['Inter'] text-xs uppercase tracking-widest font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 scale-98-on-click duration-200 transition-all">
+<span class="material-symbols-outlined text-[18px]">history</span>
+<span>Sessions</span>
+</button>
+</div>
+<!-- Footer Nav -->
+<div class="flex flex-col gap-y-1 pt-4 border-t border-slate-200/50 dark:border-slate-800/50 mt-auto">
+<button class="flex items-center gap-3 px-3 py-2 rounded-md w-full text-left font-['Inter'] text-xs uppercase tracking-widest font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-all">
+<span class="material-symbols-outlined text-[18px]">description</span>
+<span>Docs</span>
+</button>
+<button class="flex items-center gap-3 px-3 py-2 rounded-md w-full text-left font-['Inter'] text-xs uppercase tracking-widest font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-all">
+<span class="material-symbols-outlined text-[18px]">help_outline</span>
+<span>Support</span>
+</button>
+</div>
+</nav>
+<!-- Main Working Area -->
+<div class="flex-1 flex flex-col h-screen overflow-hidden min-w-0">
+<!-- JSON Component: TopNavBar -->
+<header class="w-full sticky top-0 z-50 bg-slate-50/80 dark:bg-slate-900/80 backdrop-blur-xl flex justify-between items-center px-6 h-12">
+<div class="flex items-center gap-4">
+<span class="text-lg font-bold tracking-tighter text-slate-900 dark:text-slate-100">PrismTrace</span>
+</div>
+<div class="flex items-center gap-4 font-['Inter'] tracking-tight text-sm">
+<!-- Theme Segmented Control -->
+<div class="flex items-center bg-surface-container-high rounded p-0.5 shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]">
+<button class="px-3 py-1 text-xs font-medium bg-surface-container-lowest text-on-surface shadow-sm rounded-sm ring-1 ring-black/5">Light</button>
+<button class="px-3 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface transition-colors">Dark</button>
+</div>
+<!-- Language Segmented Control -->
+<div class="flex items-center bg-surface-container-high rounded p-0.5 shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]">
+<button class="px-3 py-1 text-xs font-medium text-on-surface-variant hover:text-on-surface transition-colors">中文</button>
+<button class="px-3 py-1 text-xs font-medium bg-surface-container-lowest text-on-surface shadow-sm rounded-sm ring-1 ring-black/5">EN</button>
+</div>
+<div class="w-[1px] h-4 bg-outline-variant/30 mx-1"></div>
+<!-- Settings Icon -->
+<button class="text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 transition-colors rounded-md p-1 flex items-center justify-center snappy 150ms linear-out-slow-in">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+</button>
+</div>
+</header>
+<!-- Canvas Area (Two Columns: Feed & Inspector) -->
+<!-- No-Line Rule: Separated by background tonal shifts only -->
+<div class="flex-1 flex overflow-hidden bg-surface">
+<!-- Center Column: Unified Telemetry Feed -->
+<main class="flex-1 flex flex-col bg-surface-container-lowest min-w-0">
+<div class="px-8 pt-8 pb-4 flex items-end justify-between shrink-0">
+<div>
+<h2 class="text-[1.375rem] font-semibold tracking-[-0.02em] text-on-surface">Unified Telemetry Feed</h2>
+<p class="text-sm text-on-surface-variant mt-1 font-label">Real-time event capture across registered nodes.</p>
+</div>
+<div class="flex gap-2">
+<button class="px-3 py-1.5 text-xs font-medium text-secondary hover:bg-surface-container-high rounded transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">filter_list</span> Filter
+                        </button>
+</div>
+</div>
+<!-- Data Feed Table/List -->
+<div class="flex-1 overflow-y-auto px-8 pb-8 mac-scrollbar">
+<!-- Invisible Grid Header -->
+<div class="grid grid-cols-[2fr_1.5fr_3fr_1fr_1fr] gap-4 py-3 border-b border-surface-container-high text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-2">
+<div>Source</div>
+<div>Kind</div>
+<div>Summary</div>
+<div class="text-right">Time</div>
+<div class="text-right">Status</div>
+</div>
+<!-- Row 1 -->
+<div class="group grid grid-cols-[2fr_1.5fr_3fr_1fr_1fr] gap-4 py-3 items-center rounded px-2 -mx-2 hover:bg-surface-container-low transition-colors duration-150 cursor-pointer">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-primary">dns</span>
+<span class="text-sm font-medium text-on-surface">Codex App Server</span>
+</div>
+<div class="text-sm text-on-surface-variant">Tool Call</div>
+<div class="text-xs font-mono text-on-surface bg-surface-container px-1.5 py-0.5 rounded">fetch_user_profile()</div>
+<div class="text-sm text-on-surface-variant font-mono text-right">10:42:01</div>
+<div class="flex justify-end items-center gap-1.5">
+<div class="w-2 h-2 rounded-full bg-primary"></div>
+<span class="text-xs font-medium text-primary">Active</span>
+</div>
+</div>
+<!-- Row 2 -->
+<div class="group grid grid-cols-[2fr_1.5fr_3fr_1fr_1fr] gap-4 py-3 items-center rounded px-2 -mx-2 hover:bg-surface-container-low transition-colors duration-150 cursor-pointer">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-primary">dns</span>
+<span class="text-sm font-medium text-on-surface">Codex App Server</span>
+</div>
+<div class="text-sm text-on-surface-variant">Inference</div>
+<div class="text-xs font-mono text-on-surface bg-surface-container px-1.5 py-0.5 rounded">generate_embeddings</div>
+<div class="text-sm text-on-surface-variant font-mono text-right">10:41:55</div>
+<div class="flex justify-end items-center gap-1.5">
+<div class="w-2 h-2 rounded-full bg-primary"></div>
+<span class="text-xs font-medium text-primary">Active</span>
+</div>
+</div>
+<!-- Row 3 -->
+<div class="group grid grid-cols-[2fr_1.5fr_3fr_1fr_1fr] gap-4 py-3 items-center rounded px-2 -mx-2 bg-surface-container-low ring-1 ring-outline-variant/20 shadow-[0_4px_24px_rgba(14,14,10,0.03)] cursor-pointer relative z-10">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-tertiary">code_blocks</span>
+<span class="text-sm font-medium text-on-surface">opencode</span>
+</div>
+<div class="text-sm text-on-surface-variant">Request</div>
+<div class="text-xs font-mono text-on-surface bg-surface-container-highest px-1.5 py-0.5 rounded">POST /v1/completions</div>
+<div class="text-sm text-on-surface-variant font-mono text-right">10:40:30</div>
+<div class="flex justify-end items-center gap-1.5">
+<div class="w-2 h-2 rounded-full bg-outline-variant"></div>
+<span class="text-xs font-medium text-on-surface-variant">Idle</span>
+</div>
+</div>
+<!-- Row 4 -->
+<div class="group grid grid-cols-[2fr_1.5fr_3fr_1fr_1fr] gap-4 py-3 items-center rounded px-2 -mx-2 hover:bg-surface-container-low transition-colors duration-150 cursor-pointer">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-primary">dns</span>
+<span class="text-sm font-medium text-on-surface">Codex App Server</span>
+</div>
+<div class="text-sm text-on-surface-variant">Exception</div>
+<div class="text-xs font-mono text-error bg-error-container/20 px-1.5 py-0.5 rounded">TimeoutError: socket</div>
+<div class="text-sm text-on-surface-variant font-mono text-right">10:40:12</div>
+<div class="flex justify-end items-center gap-1.5">
+<div class="w-2 h-2 rounded-full bg-error"></div>
+<span class="text-xs font-medium text-error">Critical</span>
+</div>
+</div>
+</div>
+</main>
+<!-- Right Column: Observability & Inspector -->
+<aside class="w-[400px] shrink-0 bg-surface-container-low flex flex-col h-full border-l border-surface-variant/50">
+<!-- Health Widget -->
+<div class="p-6 shrink-0">
+<h3 class="text-xs font-medium text-on-surface-variant uppercase tracking-widest mb-4">Observability Health</h3>
+<div class="flex items-baseline gap-2">
+<span class="text-4xl font-semibold tracking-tighter text-on-surface">100<span class="text-2xl text-on-surface-variant">%</span></span>
+<div class="flex items-center gap-1 text-primary bg-primary-container/30 px-2 py-0.5 rounded-full">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+<span class="text-[11px] font-medium uppercase tracking-wide">System Nominal</span>
+</div>
+</div>
+</div>
+<!-- Temporal Timeline Mini -->
+<div class="px-6 pb-6 shrink-0">
+<h3 class="text-xs font-medium text-on-surface-variant uppercase tracking-widest mb-3">Temporal Timeline</h3>
+<div class="h-16 w-full flex items-end gap-[2px] opacity-80">
+<div class="w-full bg-primary/20 rounded-t-sm" style="height: 20%"></div>
+<div class="w-full bg-primary/40 rounded-t-sm" style="height: 45%"></div>
+<div class="w-full bg-primary/30 rounded-t-sm" style="height: 30%"></div>
+<div class="w-full bg-error/60 rounded-t-sm" style="height: 90%"></div>
+<div class="w-full bg-primary/20 rounded-t-sm" style="height: 25%"></div>
+<div class="w-full bg-primary/50 rounded-t-sm" style="height: 60%"></div>
+<div class="w-full bg-primary/40 rounded-t-sm" style="height: 40%"></div>
+<div class="w-full bg-primary rounded-t-sm" style="height: 75%"></div>
+<div class="w-full bg-primary/30 rounded-t-sm" style="height: 35%"></div>
+<div class="w-full bg-primary/20 rounded-t-sm" style="height: 15%"></div>
+</div>
+<div class="flex justify-between text-[10px] text-on-surface-variant font-mono mt-1">
+<span>10:35</span>
+<span>Now</span>
+</div>
+</div>
+<!-- Inspector -->
+<div class="flex-1 flex flex-col bg-surface-container-lowest m-4 mt-0 rounded-lg shadow-[0_4px_24px_rgba(14,14,10,0.04)] overflow-hidden">
+<div class="px-4 py-3 border-b border-surface-container-high bg-surface flex justify-between items-center shrink-0">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant">target</span>
+<h3 class="text-sm font-semibold text-on-surface">Inspector</h3>
+</div>
+<button class="text-secondary hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined text-[16px]">content_copy</span>
+</button>
+</div>
+<div class="p-4 flex-1 overflow-y-auto mac-scrollbar bg-surface-bright">
+<div class="grid grid-cols-[100px_1fr] gap-y-2 text-sm font-mono mb-6">
+<div class="text-on-surface-variant text-right pr-4 select-none">trace_id</div>
+<div class="text-on-surface truncate">req_8f72c9a1b4</div>
+<div class="text-on-surface-variant text-right pr-4 select-none">timestamp</div>
+<div class="text-on-surface">1716301230.412</div>
+<div class="text-on-surface-variant text-right pr-4 select-none">latency</div>
+<div class="text-on-surface">142ms</div>
+</div>
+<div class="text-xs font-mono bg-[#0e0e10] text-[#f8f8ff] p-4 rounded-md overflow-x-auto selection:bg-primary/50">
+<pre class="leading-relaxed"><code>{
+  "event": "tool_call",
+  "tool_name": "fetch_user_profile",
+  "arguments": {
+    "user_id": "usr_9982x",
+    "include_history": true
+  },
+  "execution_ctx": {
+    "worker": "w-eu-west-1a",
+    "memory_mb": 512,
+    "cpu_cycles": 14092
+  },
+  "status": "success",
+  "bytes_out": 2048
+}</code></pre>
+</div>
+</div>
+</div>
+</aside>
+</div>
+</div>
+</body></html>

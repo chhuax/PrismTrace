@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PrismTrace Session Timeline Drilldown</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;family=JetBrains+Mono:wght@400;500;700&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-container-lowest": "#000000",
+                      "secondary-container": "#363C48",
+                      "on-secondary-container": "#BABFCE",
+                      "surface-variant": "#1D2637",
+                      "secondary-fixed": "#DDE2F2",
+                      "surface-container-low": "#0F131C",
+                      "tertiary-fixed": "#D9D7F8",
+                      "primary-dim": "#92BAFF",
+                      "error-container": "#7F2927",
+                      "primary-fixed-dim": "#C0D5FF",
+                      "outline": "#6C768A",
+                      "on-secondary-fixed-variant": "#565C69",
+                      "primary-fixed": "#D6E3FF",
+                      "on-tertiary-container": "#4B4A65",
+                      "on-tertiary": "#53526E",
+                      "tertiary-fixed-dim": "#CBC9E9",
+                      "error": "#EE7D77",
+                      "background": "#0B0E14",
+                      "tertiary": "#E8E5FF",
+                      "primary": "#A9C7FF",
+                      "on-error-container": "#FF9993",
+                      "surface-container-high": "#18202E",
+                      "on-surface": "#DCE5FD",
+                      "secondary": "#989EAC",
+                      "inverse-primary": "#005EB8",
+                      "on-background": "#DCE5FD",
+                      "on-tertiary-fixed-variant": "#54536F",
+                      "on-tertiary-fixed": "#383751",
+                      "secondary-dim": "#989EAC",
+                      "outline-variant": "#3F485A",
+                      "tertiary-dim": "#CBC9E9",
+                      "surface": "#0B0E14",
+                      "on-primary-fixed-variant": "#005AB2",
+                      "on-primary-fixed": "#003E7E",
+                      "surface-container-highest": "#1D2637",
+                      "secondary-fixed-dim": "#CFD4E4",
+                      "surface-bright": "#212C40",
+                      "inverse-surface": "#F9F9FF",
+                      "error-dim": "#BB5551",
+                      "surface-tint": "#A9C7FF",
+                      "on-surface-variant": "#A2ABC1",
+                      "tertiary-container": "#D9D7F8",
+                      "on-secondary": "#1A202C",
+                      "surface-container": "#141A25",
+                      "on-error": "#490106",
+                      "on-secondary-fixed": "#393F4C",
+                      "on-primary": "#003F80",
+                      "on-primary-container": "#B9D1FF",
+                      "inverse-on-surface": "#52555C",
+                      "primary-container": "#00468C",
+                      "surface-dim": "#0B0E14"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {},
+              "fontFamily": {
+                      "headline": [
+                              "Inter"
+                      ],
+                      "display": [
+                              "Inter"
+                      ],
+                      "body": [
+                              "Inter"
+                      ],
+                      "label": [
+                              "JetBrains Mono", "monospace"
+                      ]
+              },
+              "fontSize": {}
+      },
+          },
+        }
+      </script>
+<style>
+          .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+          }
+      </style>
+</head>
+<body class="bg-background text-on-background font-body h-screen flex overflow-hidden">
+<!-- TopNavBar -->
+<nav class="absolute top-0 w-full z-50 bg-slate-950/90 backdrop-blur-xl border-b border-slate-800/30 shadow-sm flex justify-between items-center px-6 py-2">
+<div class="flex items-center gap-4">
+<span class="font-headline font-black text-blue-400 tracking-tighter text-lg">PrismTrace</span>
+</div>
+<div class="flex items-center gap-4">
+<button class="bg-primary-container text-on-primary-container px-3 py-1.5 rounded-DEFAULT text-sm font-bold flex items-center gap-2 hover:bg-primary-container/80 transition-all active:scale-[0.98]">
+                Execute
+            </button>
+<div class="flex items-center gap-2 border-l border-slate-800/30 pl-4">
+<button class="text-slate-400 hover:text-slate-200 transition-colors p-1.5 rounded-DEFAULT hover:bg-blue-400/5">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+</button>
+<button class="text-slate-400 hover:text-slate-200 transition-colors p-1.5 rounded-DEFAULT hover:bg-blue-400/5">
+<span class="material-symbols-outlined text-[20px]">notifications</span>
+</button>
+<button class="text-slate-400 hover:text-slate-200 transition-colors p-1.5 rounded-DEFAULT hover:bg-blue-400/5">
+<span class="material-symbols-outlined text-[20px]">account_circle</span>
+</button>
+</div>
+</div>
+</nav>
+<!-- Main Layout Grid -->
+<div class="flex flex-1 pt-[53px]"> <!-- Offset for absolute nav -->
+<!-- Left Column: Navigation Shell -->
+<aside class="w-64 bg-slate-900 border-r border-slate-800/30 flex flex-col h-full py-4 gap-2 flex-shrink-0">
+<div class="px-4 mb-4">
+<div class="font-label text-[10px] uppercase tracking-widest text-slate-500 mb-2">V2.4.0-OBSIDIAN</div>
+<button class="w-full bg-surface-container-highest border border-outline-variant/30 text-on-surface py-2 rounded-DEFAULT text-sm font-medium flex items-center justify-center gap-2 hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined text-[16px]">add</span>
+                    New Trace
+                </button>
+</div>
+<div class="flex-1 overflow-y-auto">
+<nav class="space-y-1 px-2">
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined text-[18px]">analytics</span>
+<span class="font-label text-[11px] uppercase tracking-wider">Sources</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined text-[18px]">insights</span>
+<span class="font-label text-[11px] uppercase tracking-wider">Activity</span>
+</a>
+<!-- Active Session Tab -->
+<div class="mt-4 mb-1 px-3 font-label text-[10px] uppercase tracking-widest text-slate-500">Sessions</div>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT bg-blue-400/5 text-blue-400 border-r-2 border-blue-400 transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined text-[18px]">terminal</span>
+<span class="font-label text-[11px] uppercase tracking-wider font-bold">Sessions</span>
+</a>
+<!-- Nested Session List (Conceptual extension of the Nav) -->
+<div class="pl-8 pr-2 py-2 space-y-1 border-l border-outline-variant/30 ml-5 mt-1">
+<a class="block px-2 py-1.5 text-xs font-label text-slate-400 hover:text-on-surface rounded hover:bg-surface-container-high truncate" href="#">SESS_01: Codex Prompt</a>
+<a class="block px-2 py-1.5 text-xs font-label text-blue-400 bg-surface-container-high rounded truncate shadow-[inset_0_2px_4px_rgba(0,0,0,0.2)]" href="#">SESS_02: Opencode Runtime</a>
+<a class="block px-2 py-1.5 text-xs font-label text-slate-400 hover:text-on-surface rounded hover:bg-surface-container-high truncate" href="#">SESS_03: Data Ingest</a>
+</div>
+</nav>
+</div>
+<div class="mt-auto px-2 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined text-[18px]">menu_book</span>
+<span class="font-label text-[11px] uppercase tracking-wider">Docs</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-DEFAULT text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined text-[18px]">check_circle</span>
+<span class="font-label text-[11px] uppercase tracking-wider">Status</span>
+</a>
+</div>
+</aside>
+<!-- Center Column: Session Events Feed -->
+<main class="flex-1 bg-surface flex flex-col min-w-0 border-r border-outline-variant/30">
+<header class="px-6 py-4 border-b border-outline-variant/30 bg-surface-container-low flex justify-between items-center">
+<div>
+<h1 class="text-sm font-headline font-bold text-on-surface flex items-center gap-2">
+                        Session Events
+                        <span class="px-2 py-0.5 rounded-sm bg-primary-container/20 text-primary border border-primary/20 font-label text-[10px] uppercase tracking-wider">Filter: SESS_02</span>
+</h1>
+</div>
+<div class="flex gap-2">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-2 top-1.5 text-[16px] text-slate-500">search</span>
+<input class="bg-surface-container-lowest border border-outline-variant/30 text-xs font-label pl-8 pr-3 py-1.5 rounded-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none text-on-surface w-48 placeholder-slate-600 transition-all" placeholder="Filter events..." type="text"/>
+</div>
+</div>
+</header>
+<div class="flex-1 overflow-y-auto bg-surface-container-lowest p-6 space-y-4">
+<!-- Event Node: Message -->
+<div class="bg-surface-container-low border border-outline-variant/30 rounded-sm p-3 relative group hover:bg-surface-variant transition-colors cursor-pointer">
+<div class="flex items-center justify-between mb-2">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="font-label text-[10px] uppercase tracking-wider text-slate-400">MSG_IN</span>
+<span class="font-label text-xs text-on-surface">user_prompt_01</span>
+</div>
+<span class="font-label text-[10px] text-slate-500">14:02:11.042</span>
+</div>
+<div class="font-body text-sm text-slate-300 pl-4 border-l-2 border-outline-variant/30 ml-1 py-1">
+                        "Analyze the attached payload and generate a summary report."
+                    </div>
+</div>
+<!-- Event Node: Tool Call (Selected State) -->
+<div class="bg-surface-container-high border-l-2 border-primary border-y border-r border-y-outline-variant/30 border-r-outline-variant/30 rounded-sm p-3 relative shadow-[inset_0_2px_8px_rgba(0,0,0,0.5)] cursor-pointer">
+<div class="flex items-center justify-between mb-2">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]"></span>
+<span class="font-label text-[10px] uppercase tracking-wider text-primary">TOOL_CALL</span>
+<span class="font-label text-xs text-on-surface font-bold">parse_payload_v2</span>
+</div>
+<div class="flex items-center gap-3">
+<span class="font-label text-[10px] text-slate-400 flex items-center gap-1"><span class="material-symbols-outlined text-[12px]">timer</span> 142ms</span>
+<span class="font-label text-[10px] text-slate-500">14:02:11.184</span>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-2 rounded-sm font-label text-[11px] text-slate-400 overflow-x-auto border border-outline-variant/20 mt-2">
+<pre><code>{
+  "target": "buffer_A",
+  "mode": "strict",
+  "timeout": 5000
+}</code></pre>
+</div>
+</div>
+<!-- Event Node: Response -->
+<div class="bg-surface-container-low border border-outline-variant/30 rounded-sm p-3 relative group hover:bg-surface-variant transition-colors cursor-pointer">
+<div class="flex items-center justify-between mb-2">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-slate-500"></span>
+<span class="font-label text-[10px] uppercase tracking-wider text-slate-400">TOOL_RES</span>
+<span class="font-label text-xs text-on-surface">success</span>
+</div>
+<span class="font-label text-[10px] text-slate-500">14:02:11.326</span>
+</div>
+<div class="font-label text-xs text-slate-400 pl-4 border-l-2 border-outline-variant/30 ml-1 py-1 line-clamp-2">
+                        {"status": "ok", "bytes_read": 1024, "checksum": "a8f9c2..."}
+                    </div>
+</div>
+<!-- Event Node: Snapshot -->
+<div class="bg-surface-container-low border border-outline-variant/30 rounded-sm p-3 relative group hover:bg-surface-variant transition-colors cursor-pointer">
+<div class="flex items-center justify-between mb-2">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-secondary"></span>
+<span class="font-label text-[10px] uppercase tracking-wider text-slate-400">SNAPSHOT</span>
+<span class="font-label text-xs text-on-surface">state_capture</span>
+</div>
+<span class="font-label text-[10px] text-slate-500">14:02:11.500</span>
+</div>
+<div class="flex gap-2 mt-2">
+<span class="bg-surface-container-highest px-2 py-1 rounded-sm text-[10px] font-label text-slate-400 border border-outline-variant/30">MEM: 45MB</span>
+<span class="bg-surface-container-highest px-2 py-1 rounded-sm text-[10px] font-label text-slate-400 border border-outline-variant/30">CPU: 12%</span>
+</div>
+</div>
+</div>
+</main>
+<!-- Right Column: Timeline & Inspector -->
+<aside class="w-[400px] flex flex-col bg-surface-container-high border-l border-slate-800/30 flex-shrink-0">
+<!-- Top Portion: Session Timeline -->
+<div class="flex-1 flex flex-col min-h-0 border-b border-outline-variant/30">
+<header class="px-4 py-3 border-b border-outline-variant/30 bg-surface-container-low flex items-center justify-between">
+<h2 class="text-xs font-headline font-bold uppercase tracking-widest text-slate-300">Session Timeline</h2>
+<button class="text-slate-500 hover:text-slate-300"><span class="material-symbols-outlined text-[16px]">more_vert</span></button>
+</header>
+<div class="flex-1 overflow-y-auto p-4 bg-surface-container-low">
+<div class="relative">
+<!-- Vertical Timeline Line -->
+<div class="absolute left-[11px] top-2 bottom-2 w-px bg-outline-variant/40"></div>
+<!-- Timeline Items -->
+<div class="space-y-6">
+<!-- Start -->
+<div class="relative flex gap-4 opacity-50">
+<div class="w-6 h-6 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center z-10">
+<div class="w-2 h-2 rounded-full bg-slate-500"></div>
+</div>
+<div class="flex-1 pt-1">
+<div class="font-label text-[10px] text-slate-500">14:02:11.000</div>
+<div class="font-label text-xs text-slate-400">Session Start</div>
+</div>
+</div>
+<!-- MSG -->
+<div class="relative flex gap-4 opacity-70 cursor-pointer hover:opacity-100 transition-opacity">
+<div class="w-6 h-6 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center z-10">
+<span class="material-symbols-outlined text-[12px] text-primary">chat_bubble</span>
+</div>
+<div class="flex-1 pt-1">
+<div class="font-label text-[10px] text-slate-500">14:02:11.042</div>
+<div class="font-label text-xs text-on-surface">Message Received</div>
+</div>
+</div>
+<!-- Selected Tool Call -->
+<div class="relative flex gap-4 cursor-pointer">
+<div class="w-6 h-6 rounded-full bg-primary-container border border-primary flex items-center justify-center z-10 shadow-[0_0_10px_rgba(169,199,255,0.2)]">
+<span class="material-symbols-outlined text-[12px] text-primary" style="font-variation-settings: 'FILL' 1;">build</span>
+</div>
+<div class="flex-1 pt-1 bg-surface-container-highest p-2 rounded-sm border border-primary/30 -mt-1 -ml-2 pl-4">
+<div class="flex justify-between items-start">
+<div class="font-label text-[10px] text-primary">14:02:11.184</div>
+<span class="font-label text-[9px] bg-primary/10 text-primary px-1 py-0.5 rounded-sm">ACTIVE</span>
+</div>
+<div class="font-label text-xs font-bold text-primary mt-1">Tool Call: parse_payload</div>
+</div>
+</div>
+<!-- RES -->
+<div class="relative flex gap-4 opacity-50 cursor-pointer hover:opacity-100 transition-opacity">
+<div class="w-6 h-6 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center z-10">
+<span class="material-symbols-outlined text-[12px] text-slate-400">check_circle</span>
+</div>
+<div class="flex-1 pt-1">
+<div class="font-label text-[10px] text-slate-500">14:02:11.326</div>
+<div class="font-label text-xs text-slate-400">Response</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom Portion: Compact Inspector -->
+<div class="h-64 flex flex-col bg-surface-container-low">
+<header class="px-4 py-2 border-b border-outline-variant/30 flex items-center justify-between bg-surface-container-highest">
+<h2 class="text-xs font-label uppercase tracking-widest text-slate-300">Inspector</h2>
+<span class="font-label text-[10px] text-primary border border-primary/30 px-1.5 py-0.5 rounded-sm bg-primary/5">parse_payload_v2</span>
+</header>
+<div class="p-4 flex-1 overflow-y-auto space-y-4">
+<!-- Metadata Grid -->
+<div class="grid grid-cols-2 gap-4">
+<div>
+<div class="font-label text-[9px] uppercase tracking-wider text-slate-500 mb-1">Latency</div>
+<div class="font-label text-sm text-on-surface">142ms</div>
+</div>
+<div>
+<div class="font-label text-[9px] uppercase tracking-wider text-slate-500 mb-1">Token Count</div>
+<div class="font-label text-sm text-on-surface">45 / <span class="text-slate-500">2048</span></div>
+</div>
+<div>
+<div class="font-label text-[9px] uppercase tracking-wider text-slate-500 mb-1">Status</div>
+<div class="flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+<span class="font-label text-xs text-emerald-400">OK</span>
+</div>
+</div>
+<div>
+<div class="font-label text-[9px] uppercase tracking-wider text-slate-500 mb-1">Trace ID</div>
+<div class="font-label text-[10px] text-slate-400 truncate">trc_982b...</div>
+</div>
+</div>
+<div class="border-t border-outline-variant/30 pt-4">
+<div class="font-label text-[9px] uppercase tracking-wider text-slate-500 mb-2 flex justify-between">
+<span>Raw Payload Size</span>
+<span>1.2 KB</span>
+</div>
+<div class="w-full bg-surface-container-highest h-1 rounded-full overflow-hidden">
+<div class="bg-primary h-full w-1/4"></div>
+</div>
+</div>
+</div>
+</div>
+</aside>
+</div>
+</body></html>

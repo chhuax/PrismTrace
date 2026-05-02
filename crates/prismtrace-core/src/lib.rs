@@ -50,6 +50,35 @@ pub struct ProcessSample {
 }
 
 impl ProcessSample {
+    fn is_packaged_node_cli(&self) -> bool {
+        let process_name = self.process_name.to_ascii_lowercase();
+        let executable_path = self.executable_path.to_string_lossy().to_ascii_lowercase();
+        let command_line = self
+            .command_line
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        (process_name == "opencode"
+            && (executable_path == "opencode"
+                || executable_path.ends_with("/.opencode/bin/opencode")))
+            || (executable_path.ends_with("/applications/codex.app/contents/resources/codex")
+                && command_line.contains(" app-server"))
+    }
+
+    fn is_packaged_electron_app(&self) -> bool {
+        let executable_path = self.executable_path.to_string_lossy().to_ascii_lowercase();
+        let command_line = self
+            .command_line
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        executable_path.contains(".app/contents/macos/")
+            && (command_line.contains(".app/contents/resources/app.asar")
+                || executable_path.ends_with("/applications/codex.app/contents/macos/codex"))
+    }
+
     fn first_script_argument<'a, I>(parts: &mut I) -> Option<&'a str>
     where
         I: Iterator<Item = &'a str>,
@@ -115,10 +144,11 @@ impl ProcessSample {
             .unwrap_or_default()
             .to_ascii_lowercase();
 
-        if process_name == "node" || executable_name == "node" {
+        if process_name == "node" || executable_name == "node" || self.is_packaged_node_cli() {
             RuntimeKind::Node
         } else if process_name == "electron"
             || executable_name == "electron"
+            || self.is_packaged_electron_app()
             || self
                 .executable_path
                 .to_string_lossy()
@@ -165,173 +195,6 @@ impl ProcessSample {
             command_line: self.command_line.clone(),
             runtime_kind: self.runtime_kind(),
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttachReadinessStatus {
-    Supported,
-    Unsupported,
-    PermissionDenied,
-    Unknown,
-}
-
-impl AttachReadinessStatus {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Supported => "supported",
-            Self::Unsupported => "unsupported",
-            Self::PermissionDenied => "permission_denied",
-            Self::Unknown => "unknown",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AttachReadiness {
-    pub target: ProcessTarget,
-    pub status: AttachReadinessStatus,
-    pub reason: String,
-}
-
-impl AttachReadiness {
-    pub fn summary(&self) -> String {
-        format!(
-            "[{}] {} (pid {}): {}",
-            self.status.label(),
-            self.target.display_name(),
-            self.target.pid,
-            self.reason
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttachSessionState {
-    Attaching,
-    Attached,
-    Detached,
-    Failed,
-}
-
-impl AttachSessionState {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Attaching => "attaching",
-            Self::Attached => "attached",
-            Self::Detached => "detached",
-            Self::Failed => "failed",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttachFailureKind {
-    NotReady,
-    ActiveSessionExists,
-    BackendRejected,
-    HandshakeFailed,
-    NoActiveSession,
-    DetachFailed,
-}
-
-impl AttachFailureKind {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::NotReady => "not_ready",
-            Self::ActiveSessionExists => "active_session_exists",
-            Self::BackendRejected => "backend_rejected",
-            Self::HandshakeFailed => "handshake_failed",
-            Self::NoActiveSession => "no_active_session",
-            Self::DetachFailed => "detach_failed",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AttachFailure {
-    pub kind: AttachFailureKind,
-    pub reason: String,
-}
-
-impl AttachFailure {
-    pub fn summary(&self) -> String {
-        format!("[{}] {}", self.kind.label(), self.reason)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProbeBootstrapState {
-    Pending,
-    Ready,
-    Failed,
-}
-
-impl ProbeBootstrapState {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Ready => "ready",
-            Self::Failed => "failed",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProbeBootstrap {
-    pub state: ProbeBootstrapState,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AttachSession {
-    pub target: ProcessTarget,
-    pub state: AttachSessionState,
-    pub detail: String,
-    pub bootstrap: Option<ProbeBootstrap>,
-    pub failure: Option<AttachFailure>,
-}
-
-impl AttachSession {
-    pub fn summary(&self) -> String {
-        format!(
-            "[{}] {} (pid {}): {}",
-            self.state.label(),
-            self.target.display_name(),
-            self.target.pid,
-            self.detail
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProbeState {
-    Detached,
-    Attaching,
-    Attached,
-    Failed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProbeHealth {
-    pub state: ProbeState,
-    pub installed_hooks: Vec<String>,
-    pub failed_hooks: Vec<String>,
-}
-
-impl ProbeHealth {
-    pub fn summary(&self) -> String {
-        format!(
-            "{} (installed: {}, failed: {})",
-            match self.state {
-                ProbeState::Detached => "detached",
-                ProbeState::Attaching => "attaching",
-                ProbeState::Attached => "attached",
-                ProbeState::Failed => "failed",
-            },
-            self.installed_hooks.len(),
-            self.failed_hooks.len()
-        )
     }
 }
 
@@ -439,9 +302,7 @@ impl IpcMessage {
 #[cfg(test)]
 mod tests {
     use super::{
-        AttachFailure, AttachFailureKind, AttachReadiness, AttachReadinessStatus, AttachSession,
-        AttachSessionState, HttpHeader, IpcMessage, IpcParseErrorKind, ProbeBootstrap,
-        ProbeBootstrapState, ProbeHealth, ProbeState, ProcessSample, ProcessTarget, RuntimeKind,
+        HttpHeader, IpcMessage, IpcParseErrorKind, ProcessSample, ProcessTarget, RuntimeKind,
     };
     use std::path::PathBuf;
 
@@ -466,17 +327,6 @@ mod tests {
     }
 
     #[test]
-    fn probe_health_summary_mentions_state_and_hook_counts() {
-        let health = ProbeHealth {
-            state: ProbeState::Attached,
-            installed_hooks: vec!["fetch".into(), "undici".into()],
-            failed_hooks: vec!["http".into()],
-        };
-
-        assert_eq!(health.summary(), "attached (installed: 2, failed: 1)");
-    }
-
-    #[test]
     fn process_sample_classifies_node_processes() {
         let sample = ProcessSample {
             pid: 7,
@@ -498,6 +348,57 @@ mod tests {
         };
 
         assert_eq!(sample.runtime_kind(), RuntimeKind::Electron);
+    }
+
+    #[test]
+    fn process_sample_classifies_packaged_opencode_binary_as_node() {
+        let sample = ProcessSample {
+            pid: 8,
+            process_name: "opencode".into(),
+            executable_path: PathBuf::from("/Users/test/.opencode/bin/opencode"),
+            command_line: Some("/Users/test/.opencode/bin/opencode".into()),
+        };
+
+        assert_eq!(sample.runtime_kind(), RuntimeKind::Node);
+    }
+
+    #[test]
+    fn process_sample_classifies_bare_opencode_process_name_as_node() {
+        let sample = ProcessSample {
+            pid: 8,
+            process_name: "opencode".into(),
+            executable_path: PathBuf::from("opencode"),
+            command_line: Some("opencode".into()),
+        };
+
+        assert_eq!(sample.runtime_kind(), RuntimeKind::Node);
+    }
+
+    #[test]
+    fn process_sample_classifies_codex_main_app_as_electron() {
+        let sample = ProcessSample {
+            pid: 8,
+            process_name: "Codex".into(),
+            executable_path: PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex"),
+            command_line: Some("/Applications/Codex.app/Contents/MacOS/Codex".into()),
+        };
+
+        assert_eq!(sample.runtime_kind(), RuntimeKind::Electron);
+    }
+
+    #[test]
+    fn process_sample_classifies_codex_app_server_as_node() {
+        let sample = ProcessSample {
+            pid: 8,
+            process_name: "codex".into(),
+            executable_path: PathBuf::from("/Applications/Codex.app/Contents/Resources/codex"),
+            command_line: Some(
+                "/Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled"
+                    .into(),
+            ),
+        };
+
+        assert_eq!(sample.runtime_kind(), RuntimeKind::Node);
     }
 
     #[test]
@@ -569,119 +470,10 @@ mod tests {
             target.command_line,
             Some("/Applications/Codex.app/Contents/MacOS/Codex".into())
         );
-        assert_eq!(target.runtime_kind, RuntimeKind::Unknown);
+        assert_eq!(target.runtime_kind, RuntimeKind::Electron);
     }
 
-    #[test]
-    fn attach_readiness_status_labels_are_stable() {
-        assert_eq!(AttachReadinessStatus::Supported.label(), "supported");
-        assert_eq!(AttachReadinessStatus::Unsupported.label(), "unsupported");
-        assert_eq!(
-            AttachReadinessStatus::PermissionDenied.label(),
-            "permission_denied"
-        );
-        assert_eq!(AttachReadinessStatus::Unknown.label(), "unknown");
-    }
-
-    #[test]
-    fn attach_readiness_summary_includes_status_and_reason() {
-        let readiness = AttachReadiness {
-            target: ProcessTarget {
-                pid: 501,
-                app_name: "Codex".into(),
-                executable_path: PathBuf::from("/Applications/Codex.app/Contents/MacOS/Codex"),
-                command_line: None,
-                runtime_kind: RuntimeKind::Unknown,
-            },
-            status: AttachReadinessStatus::Unknown,
-            reason: "runtime classification is not strong enough yet".into(),
-        };
-
-        assert_eq!(
-            readiness.summary(),
-            "[unknown] Codex (pid 501): runtime classification is not strong enough yet"
-        );
-    }
-
-    #[test]
-    fn attach_session_state_labels_are_stable() {
-        assert_eq!(AttachSessionState::Attaching.label(), "attaching");
-        assert_eq!(AttachSessionState::Attached.label(), "attached");
-        assert_eq!(AttachSessionState::Detached.label(), "detached");
-        assert_eq!(AttachSessionState::Failed.label(), "failed");
-    }
-
-    #[test]
-    fn attach_failure_kind_labels_are_stable() {
-        assert_eq!(AttachFailureKind::NotReady.label(), "not_ready");
-        assert_eq!(
-            AttachFailureKind::ActiveSessionExists.label(),
-            "active_session_exists"
-        );
-        assert_eq!(
-            AttachFailureKind::BackendRejected.label(),
-            "backend_rejected"
-        );
-        assert_eq!(
-            AttachFailureKind::HandshakeFailed.label(),
-            "handshake_failed"
-        );
-        assert_eq!(
-            AttachFailureKind::NoActiveSession.label(),
-            "no_active_session"
-        );
-        assert_eq!(AttachFailureKind::DetachFailed.label(), "detach_failed");
-    }
-
-    #[test]
-    fn probe_bootstrap_state_labels_are_stable() {
-        assert_eq!(ProbeBootstrapState::Pending.label(), "pending");
-        assert_eq!(ProbeBootstrapState::Ready.label(), "ready");
-        assert_eq!(ProbeBootstrapState::Failed.label(), "failed");
-    }
-
-    #[test]
-    fn attach_failure_summary_includes_kind_and_reason() {
-        let failure = AttachFailure {
-            kind: AttachFailureKind::HandshakeFailed,
-            reason: "probe handshake did not complete".into(),
-        };
-
-        assert_eq!(
-            failure.summary(),
-            "[handshake_failed] probe handshake did not complete"
-        );
-    }
-
-    #[test]
-    fn attach_session_summary_includes_state_target_and_detail() {
-        let session = AttachSession {
-            target: ProcessTarget {
-                pid: 601,
-                app_name: "Electron".into(),
-                executable_path: PathBuf::from(
-                    "/Applications/Electron.app/Contents/MacOS/Electron",
-                ),
-                command_line: None,
-                runtime_kind: RuntimeKind::Electron,
-            },
-            state: AttachSessionState::Attached,
-            detail: "probe handshake completed".into(),
-            bootstrap: Some(ProbeBootstrap {
-                state: ProbeBootstrapState::Ready,
-                message: "probe online".into(),
-            }),
-            failure: None,
-        };
-
-        assert_eq!(
-            session.summary(),
-            "[attached] Electron (pid 601): probe handshake completed"
-        );
-    }
-
-    // --- IpcMessage tests (Requirements 3.4, 7.1) ---
-
+    // --- IpcMessage tests ---
     #[test]
     fn ipc_message_heartbeat_round_trip() {
         let msg = IpcMessage::Heartbeat {

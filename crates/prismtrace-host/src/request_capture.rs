@@ -267,6 +267,25 @@ pub fn consume_probe_events(
             handle.shutdown();
         }
 
+        if request_shutdown && shutdown.is_none() {
+            let grace_deadline = Instant::now() + worker_timeout_slack;
+            while worker
+                .as_ref()
+                .is_some_and(|join_handle| !join_handle.is_finished())
+                && Instant::now() < grace_deadline
+            {
+                let remaining = grace_deadline.saturating_duration_since(Instant::now());
+                let sleep_for = if remaining > wait_poll_step {
+                    wait_poll_step
+                } else {
+                    remaining
+                };
+                if !sleep_for.is_zero() {
+                    thread::sleep(sleep_for);
+                }
+            }
+        }
+
         let can_join = match worker.as_ref() {
             None => false,
             Some(join_handle) => {
@@ -353,7 +372,7 @@ pub fn consume_probe_events(
                 });
             }
             Ok(IpcEvent::HeartbeatTimeout { elapsed_ms }) => {
-                let listener = cleanup_worker(&mut worker, false);
+                let listener = cleanup_worker(&mut worker, true);
                 writeln!(output, "[probe-timeout] {} ms since heartbeat", elapsed_ms)?;
                 return Ok(ProbeConsumeOutcome {
                     exit: ProbeConsumeExit::HeartbeatTimeout { elapsed_ms },

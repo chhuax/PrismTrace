@@ -342,6 +342,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "prismtrace-analysis"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "prismtrace-api"
+version = "0.1.0"
+dependencies = [
+ "prismtrace-analysis",
+ "serde_json",
+]
+
+[[package]]
 name = "prismtrace-core"
 version = "0.1.0"
 dependencies = [
@@ -353,7 +368,11 @@ dependencies = [
 name = "prismtrace-host"
 version = "0.1.0"
 dependencies = [
+ "prismtrace-analysis",
+ "prismtrace-api",
  "prismtrace-core",
+ "prismtrace-index",
+ "prismtrace-sources",
  "prismtrace-storage",
  "serde_json",
  "tungstenite",
@@ -361,8 +380,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "prismtrace-index"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "prismtrace-sources"
+version = "0.1.0"
+dependencies = [
+ "prismtrace-storage",
+ "serde_json",
+]
+
+[[package]]
 name = "prismtrace-storage"
 version = "0.1.0"
+dependencies = [
+ "prismtrace-index",
+]
 
 [[package]]
 name = "proc-macro2"

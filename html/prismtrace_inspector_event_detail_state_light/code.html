@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PrismTrace Inspector - Event Detail</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "secondary": "#5d5f65",
+                        "surface-container-highest": "#e3e2e9",
+                        "primary": "#005cba",
+                        "secondary-fixed-dim": "#d4d4db",
+                        "on-primary-container": "#0050a2",
+                        "surface-container-low": "#f5f3f6",
+                        "primary-fixed-dim": "#c1d5ff",
+                        "secondary-dim": "#515359",
+                        "error-container": "#fe8983",
+                        "on-secondary-fixed-variant": "#5a5b61",
+                        "tertiary": "#5e5c78",
+                        "on-primary": "#f7f7ff",
+                        "primary-fixed": "#d7e3ff",
+                        "secondary-container": "#e2e2e9",
+                        "tertiary-dim": "#52506b",
+                        "on-secondary-container": "#505257",
+                        "surface-container": "#efedf2",
+                        "inverse-surface": "#0e0e10",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-dim": "#dad9e1",
+                        "on-tertiary": "#fbf7ff",
+                        "inverse-on-surface": "#9e9c9f",
+                        "on-surface-variant": "#5e5f65",
+                        "primary-container": "#d7e3ff",
+                        "on-secondary-fixed": "#3d3f45",
+                        "error": "#9f403d",
+                        "on-error-container": "#752121",
+                        "tertiary-container": "#d7d4f5",
+                        "tertiary-fixed-dim": "#c9c6e6",
+                        "outline-variant": "#b2b1b8",
+                        "surface-variant": "#e3e2e9",
+                        "on-tertiary-fixed": "#36354f",
+                        "primary-dim": "#0051a4",
+                        "on-primary-fixed": "#003e80",
+                        "tertiary-fixed": "#d7d4f5",
+                        "surface": "#fcf8fb",
+                        "outline": "#7a7a80",
+                        "on-surface": "#313238",
+                        "inverse-primary": "#5095fe",
+                        "secondary-fixed": "#e2e2e9",
+                        "surface-container-high": "#e9e7ed",
+                        "on-secondary": "#f8f8ff",
+                        "on-tertiary-container": "#494863",
+                        "on-primary-fixed-variant": "#005ab4",
+                        "on-background": "#313238",
+                        "surface-tint": "#005cba",
+                        "background": "#fcf8fb",
+                        "surface-bright": "#fcf8fb",
+                        "on-error": "#fff7f6",
+                        "error-dim": "#4e0309",
+                        "on-tertiary-fixed-variant": "#53526d"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    fontFamily: {
+                        "headline": ["Inter", "sans-serif"],
+                        "display": ["Inter", "sans-serif"],
+                        "body": ["Inter", "sans-serif"],
+                        "label": ["Inter", "sans-serif"],
+                        "mono": ["JetBrains Mono", "monospace"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; background-color: #fcf8fb; color: #313238; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+        .material-symbols-outlined.fill { font-variation-settings: 'FILL' 1; }
+        
+        /* Custom scrollbar for subtle, native feel */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #d4d4db; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #b2b1b8; }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden antialiased selection:bg-primary-container selection:text-on-primary-container">
+<!-- Left Column: SideNavBar -->
+<nav class="flex flex-col h-full py-6 px-4 space-y-8 h-screen w-64 fixed left-0 top-0 bg-slate-100/90 dark:bg-slate-950/90 backdrop-blur-xl tonal-shift-right bg-slate-200 dark:bg-slate-800 z-10">
+<!-- Brand / Header -->
+<div class="px-3 mb-4">
+<h1 class="text-blue-700 font-black font-headline tracking-tight text-lg mb-1 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">analytics</span>
+                Console
+            </h1>
+<p class="font-sans text-xs uppercase tracking-widest font-medium text-slate-500 dark:text-slate-400">Precision Inspector</p>
+</div>
+<!-- Navigation Tabs -->
+<div class="space-y-1 flex-1">
+<a class="flex items-center gap-3 px-3 py-2 rounded-md font-sans text-xs uppercase tracking-widest font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 transition-all active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined text-[18px]">database</span>
+                Sources
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-md font-sans text-xs uppercase tracking-widest font-medium bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-sm rounded-md active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined text-[18px] fill">analytics</span>
+                Activity
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-md font-sans text-xs uppercase tracking-widest font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 transition-all active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined text-[18px]">history</span>
+                Sessions
+            </a>
+</div>
+<!-- Footer Tabs -->
+<div class="space-y-1 mt-auto pt-4 border-t border-surface-dim/20">
+<a class="flex items-center gap-3 px-3 py-2 rounded-md font-sans text-xs uppercase tracking-widest font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 transition-all active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined text-[18px]">terminal</span>
+                Diagnostics
+            </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-md font-sans text-xs uppercase tracking-widest font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/50 transition-all active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined text-[18px]">list_alt</span>
+                Logs
+            </a>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 ml-64 flex bg-surface-container-low h-full overflow-hidden relative">
+<!-- Center Column: Events Feed -->
+<section class="flex-1 flex flex-col min-w-0 bg-surface border-r border-surface-dim/30">
+<!-- Header -->
+<header class="h-14 flex items-center justify-between px-4 border-b border-surface-dim/30 bg-surface/90 backdrop-blur sticky top-0 z-10">
+<div class="flex items-center gap-3">
+<h2 class="text-sm font-semibold text-on-surface">Telemetry Feed</h2>
+<span class="text-xs text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">Live</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-1.5 text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-md transition-colors">
+<span class="material-symbols-outlined text-[18px]">filter_list</span>
+</button>
+<button class="p-1.5 text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-md transition-colors">
+<span class="material-symbols-outlined text-[18px]">search</span>
+</button>
+</div>
+</header>
+<!-- Feed List -->
+<div class="flex-1 overflow-y-auto py-2">
+<!-- Item 1 -->
+<div class="px-4 py-3 cursor-pointer hover:bg-surface-container-low transition-colors group">
+<div class="flex justify-between items-start mb-1">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-outline"></span>
+<span class="text-xs font-mono text-on-surface-variant">api-gw-prod</span>
+</div>
+<span class="text-[11px] text-on-surface-variant">14:02:11.002</span>
+</div>
+<div class="flex items-start gap-2">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant mt-0.5">http</span>
+<div>
+<p class="text-sm font-medium text-on-surface">HTTP_REQUEST</p>
+<p class="text-xs text-on-surface-variant mt-0.5 truncate">GET /api/v1/users/profile</p>
+</div>
+</div>
+</div>
+<!-- Item 2 (Active) -->
+<div class="px-4 py-3 cursor-pointer bg-primary-container/20 border-l-2 border-primary group">
+<div class="flex justify-between items-start mb-1">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="text-xs font-mono text-primary-dim">codex-v4</span>
+</div>
+<span class="text-[11px] text-primary-dim">14:02:11.450</span>
+</div>
+<div class="flex items-start gap-2">
+<span class="material-symbols-outlined text-[16px] text-primary mt-0.5">build</span>
+<div>
+<p class="text-sm font-medium text-on-surface">TOOL_CALL</p>
+<p class="text-xs text-on-surface-variant mt-0.5 truncate">Execution of fetch_user_data completed.</p>
+</div>
+</div>
+</div>
+<!-- Item 3 -->
+<div class="px-4 py-3 cursor-pointer hover:bg-surface-container-low transition-colors group">
+<div class="flex justify-between items-start mb-1">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-error"></span>
+<span class="text-xs font-mono text-on-surface-variant">db-shard-1</span>
+</div>
+<span class="text-[11px] text-on-surface-variant">14:02:12.105</span>
+</div>
+<div class="flex items-start gap-2">
+<span class="material-symbols-outlined text-[16px] text-error mt-0.5">error</span>
+<div>
+<p class="text-sm font-medium text-on-surface">QUERY_FAILED</p>
+<p class="text-xs text-on-surface-variant mt-0.5 truncate">Connection timeout after 5000ms</p>
+</div>
+</div>
+</div>
+<!-- Item 4 -->
+<div class="px-4 py-3 cursor-pointer hover:bg-surface-container-low transition-colors group">
+<div class="flex justify-between items-start mb-1">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-outline"></span>
+<span class="text-xs font-mono text-on-surface-variant">auth-svc</span>
+</div>
+<span class="text-[11px] text-on-surface-variant">14:02:15.000</span>
+</div>
+<div class="flex items-start gap-2">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant mt-0.5">security</span>
+<div>
+<p class="text-sm font-medium text-on-surface">TOKEN_VALIDATE</p>
+<p class="text-xs text-on-surface-variant mt-0.5 truncate">JWT successfully verified.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Column: Inspector & Timeline -->
+<section class="w-[450px] flex flex-col bg-surface-container-lowest border-l border-surface-dim/30 shadow-[-4px_0_24px_rgba(14,14,10,0.02)] z-20">
+<!-- Inspector Header -->
+<header class="h-14 flex items-center justify-between px-5 border-b border-surface-dim/30 bg-surface-container-lowest">
+<h2 class="text-sm font-semibold text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px] text-primary">info</span>
+                    Event Inspector
+                </h2>
+<div class="flex gap-2">
+<button class="text-xs font-medium text-secondary hover:text-on-surface transition-colors px-2 py-1 rounded hover:bg-surface-container">Close</button>
+</div>
+</header>
+<div class="flex-1 overflow-y-auto">
+<!-- Overview Section -->
+<div class="p-5 border-b border-surface-dim/20">
+<h3 class="text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-4">Overview</h3>
+<div class="grid grid-cols-[100px_1fr] gap-y-3 gap-x-4 items-center">
+<span class="text-xs text-on-surface-variant text-right">Event Kind</span>
+<span class="text-sm font-mono text-on-surface bg-surface-container px-2 py-0.5 rounded w-fit">TOOL_CALL</span>
+<span class="text-xs text-on-surface-variant text-right">Source</span>
+<span class="text-sm text-on-surface">codex-v4</span>
+<span class="text-xs text-on-surface-variant text-right">Status</span>
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="text-sm text-on-surface">200 OK</span>
+</div>
+<span class="text-xs text-on-surface-variant text-right">Timestamp</span>
+<span class="text-sm font-mono text-on-surface-variant">2023-10-27 14:02:11.450 UTC</span>
+</div>
+</div>
+<!-- Context Section -->
+<div class="p-5 border-b border-surface-dim/20">
+<h3 class="text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-4">Context</h3>
+<div class="grid grid-cols-[100px_1fr] gap-y-3 gap-x-4 items-center">
+<span class="text-xs text-on-surface-variant text-right">trace_id</span>
+<span class="text-xs font-mono text-secondary truncate">trc_9948a7b1c</span>
+<span class="text-xs text-on-surface-variant text-right">turn_id</span>
+<span class="text-xs font-mono text-secondary truncate">trn_001</span>
+<span class="text-xs text-on-surface-variant text-right">session_ref</span>
+<a class="text-xs font-mono text-primary hover:underline truncate" href="#">ses_55x9kL</a>
+</div>
+</div>
+<!-- Payload Section -->
+<div class="p-5 border-b border-surface-dim/20">
+<div class="flex justify-between items-center mb-4">
+<h3 class="text-xs font-semibold text-on-surface-variant uppercase tracking-wider">Payload</h3>
+<button class="text-[11px] font-medium text-secondary hover:text-on-surface transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">content_copy</span> Copy
+                        </button>
+</div>
+<div class="bg-surface rounded-md p-3 border border-surface-dim/30 overflow-x-auto">
+<pre class="text-xs font-mono text-on-surface leading-relaxed"><code>{
+  "event_id": "evt_884729",
+  "tool_name": "fetch_user_data",
+  "args": {
+    "query": "SELECT * FROM users WHERE id = 'u_123'"
+  },
+  "metrics": {
+    "duration_ms": 142,
+    "tokens_used": 45
+  }
+}</code></pre>
+</div>
+</div>
+<!-- Related Links Section -->
+<div class="p-5">
+<h3 class="text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-3">Actions</h3>
+<div class="flex flex-col gap-2">
+<button class="flex items-center gap-2 text-sm text-primary hover:text-primary-dim transition-colors py-1 w-fit">
+<span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+                             Jump to Session
+                         </button>
+<button class="flex items-center gap-2 text-sm text-secondary hover:text-on-surface transition-colors py-1 w-fit">
+<span class="material-symbols-outlined text-[16px]">timeline</span>
+                             Locate in Timeline
+                         </button>
+</div>
+</div>
+</div>
+<!-- Temporal Timeline (Bottom Half) -->
+<div class="h-1/3 min-h-[250px] border-t border-surface-dim/30 bg-surface-container-low flex flex-col">
+<header class="py-2 px-4 border-b border-surface-dim/20 bg-surface/50">
+<h3 class="text-[11px] font-semibold text-on-surface-variant uppercase tracking-wider">Trace Timeline</h3>
+</header>
+<div class="flex-1 overflow-y-auto p-4">
+<div class="relative pl-4 space-y-4 before:absolute before:inset-y-0 before:left-[7px] before:w-px before:bg-surface-dim">
+<!-- Timeline Item 1 -->
+<div class="relative">
+<span class="absolute -left-4 w-2 h-2 rounded-full bg-outline border-2 border-surface-container-low top-1.5"></span>
+<div class="flex justify-between items-start">
+<p class="text-xs font-medium text-on-surface-variant">Request Initiated</p>
+<span class="text-[10px] text-on-surface-variant">0ms</span>
+</div>
+</div>
+<!-- Timeline Item 2 -->
+<div class="relative">
+<span class="absolute -left-4 w-2 h-2 rounded-full bg-outline border-2 border-surface-container-low top-1.5"></span>
+<div class="flex justify-between items-start">
+<p class="text-xs font-medium text-on-surface-variant">Auth Validated</p>
+<span class="text-[10px] text-on-surface-variant">+45ms</span>
+</div>
+</div>
+<!-- Timeline Item 3 (Active) -->
+<div class="relative">
+<span class="absolute -left-4 w-2 h-2 rounded-full bg-primary ring-2 ring-primary-container top-1.5"></span>
+<div class="flex justify-between items-start bg-surface-container-lowest p-2 rounded border border-surface-dim/30 -mt-2">
+<div>
+<p class="text-xs font-semibold text-primary">TOOL_CALL</p>
+<p class="text-[10px] text-secondary mt-0.5">fetch_user_data</p>
+</div>
+<span class="text-[10px] font-medium text-primary">+142ms</span>
+</div>
+</div>
+<!-- Timeline Item 4 -->
+<div class="relative opacity-60">
+<span class="absolute -left-4 w-2 h-2 rounded-full bg-surface-dim border-2 border-surface-container-low top-1.5"></span>
+<div class="flex justify-between items-start">
+<p class="text-xs font-medium text-on-surface-variant">Response Sent</p>
+<span class="text-[10px] text-on-surface-variant">Pending</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+</body></html>

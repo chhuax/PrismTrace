@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PrismTrace - Inspector No-Selection</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-dim": "#0B0E14",
+                        "surface-variant": "#1D2637",
+                        "primary-container": "#00468C",
+                        "on-tertiary-fixed": "#383751",
+                        "on-secondary": "#1A202C",
+                        "on-tertiary": "#53526E",
+                        "inverse-surface": "#F9F9FF",
+                        "on-primary-fixed": "#003E7E",
+                        "inverse-on-surface": "#52555C",
+                        "tertiary-fixed": "#D9D7F8",
+                        "secondary": "#989EAC",
+                        "on-error-container": "#FF9993",
+                        "on-surface-variant": "#A2ABC1",
+                        "secondary-fixed": "#DDE2F2",
+                        "secondary-dim": "#989EAC",
+                        "surface-container-highest": "#1D2637",
+                        "on-surface": "#DCE5FD",
+                        "outline-variant": "#3F485A",
+                        "error-container": "#7F2927",
+                        "background": "#0B0E14",
+                        "surface-container": "#141A25",
+                        "on-tertiary-container": "#4B4A65",
+                        "outline": "#6C768A",
+                        "secondary-container": "#363C48",
+                        "on-background": "#DCE5FD",
+                        "on-secondary-container": "#BABFCE",
+                        "surface-container-lowest": "#000000",
+                        "primary-fixed-dim": "#C0D5FF",
+                        "surface-tint": "#A9C7FF",
+                        "primary-dim": "#92BAFF",
+                        "surface": "#0B0E14",
+                        "tertiary-fixed-dim": "#CBC9E9",
+                        "on-tertiary-fixed-variant": "#54536F",
+                        "tertiary-dim": "#CBC9E9",
+                        "on-secondary-fixed-variant": "#565C69",
+                        "on-error": "#490106",
+                        "secondary-fixed-dim": "#CFD4E4",
+                        "inverse-primary": "#005EB8",
+                        "on-primary-container": "#B9D1FF",
+                        "tertiary-container": "#D9D7F8",
+                        "surface-container-low": "#0F131C",
+                        "tertiary": "#E8E5FF",
+                        "on-primary-fixed-variant": "#005AB2",
+                        "error-dim": "#BB5551",
+                        "surface-bright": "#212C40",
+                        "primary": "#A9C7FF",
+                        "on-primary": "#003F80",
+                        "on-secondary-fixed": "#393F4C",
+                        "error": "#EE7D77",
+                        "primary-fixed": "#D6E3FF",
+                        "surface-container-high": "#18202E"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter", "sans-serif"],
+                        "display": ["Inter", "sans-serif"],
+                        "body": ["Inter", "sans-serif"],
+                        "label": ["JetBrains Mono", "monospace"]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-surface text-on-surface font-body h-screen w-screen overflow-hidden flex flex-col selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar -->
+<header class="bg-[#0B0E14]/90 backdrop-blur-xl docked full-width top-0 border-b border-[#3F485A]/30 shadow-sm flex justify-between items-center w-full px-6 h-14 z-50">
+<div class="flex items-center gap-8">
+<span class="font-bold tracking-tighter text-[#5E9EFF] text-lg">PrismTrace</span>
+<nav class="hidden md:flex items-center gap-6">
+<a class="text-[#DCE5FD]/60 font-['Inter'] uppercase tracking-[0.1em] text-[10px] hover:bg-[#5E9EFF]/5 hover:text-[#DCE5FD] transition-colors duration-150 ease-in-out py-2 px-1" href="#">Dashboard</a>
+<a class="text-[#5E9EFF] border-b-2 border-[#5E9EFF] pb-1 font-['Inter'] uppercase tracking-[0.1em] text-[10px] hover:bg-[#5E9EFF]/5 hover:text-[#DCE5FD] transition-colors duration-150 ease-in-out py-2 px-1" href="#">Inspector</a>
+<a class="text-[#DCE5FD]/60 font-['Inter'] uppercase tracking-[0.1em] text-[10px] hover:bg-[#5E9EFF]/5 hover:text-[#DCE5FD] transition-colors duration-150 ease-in-out py-2 px-1" href="#">Telemetry</a>
+<a class="text-[#DCE5FD]/60 font-['Inter'] uppercase tracking-[0.1em] text-[10px] hover:bg-[#5E9EFF]/5 hover:text-[#DCE5FD] transition-colors duration-150 ease-in-out py-2 px-1" href="#">Nodes</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="text-[#DCE5FD]/60 hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[20px]" data-icon="settings">settings</span>
+</button>
+<button class="text-[#DCE5FD]/60 hover:text-primary transition-colors relative">
+<span class="material-symbols-outlined text-[20px]" data-icon="notifications_active">notifications_active</span>
+<span class="absolute top-0 right-0 w-2 h-2 bg-primary rounded-full border-2 border-surface"></span>
+</button>
+<div class="w-8 h-8 rounded-full bg-surface-variant overflow-hidden border border-outline-variant/30">
+<img alt="User profile" class="w-full h-full object-cover" data-alt="Close up portrait of a professional woman with soft studio lighting against a dark neutral background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_4h03Y1Cwq0N9vpqyasEcmXgGgdWymoRGxkOq02bQeHnju2JCrkAxLaLON1tBwOohOVqReKO-qQ5t0ZBmhoWV9sZ5j5uko5xoOC4dvG-RRajxDSFZOq7CXzxuYCJrz6zEVYQJJOkFKjUoxeTyqFUhJcoVPKgzvHSb3giPaRQ2Pkw2HPVhVyr0iW8t-YYFANrEDKUS95KdQA1UMB7HfNBznN4LygiMfTgkL--KyRikzLwiRIIQLS4F80_wIy0rUVIXkl2WKiZBR3g"/>
+</div>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden h-[calc(100vh-3.5rem)]">
+<!-- SideNavBar -->
+<aside class="hidden md:flex flex-col bg-[#18202E] border-r border-[#3F485A]/30 w-64 h-full z-40 py-4 flex-shrink-0">
+<div class="px-6 mb-8 flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-primary/20 flex items-center justify-center border border-primary/30">
+<span class="material-symbols-outlined text-primary text-sm">hub</span>
+</div>
+<div>
+<h2 class="font-bold text-sm tracking-tight text-on-surface">Inspector v2.4</h2>
+<p class="font-label text-[10px] text-primary tracking-widest mt-0.5">OBSERVER_MODE_ON</p>
+</div>
+</div>
+<nav class="flex-1 px-3 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 text-[#DCE5FD]/40 font-['JetBrains_Mono'] text-[12px] tracking-tight hover:bg-[#DCE5FD]/5 hover:text-[#DCE5FD] rounded-sm transition-colors scale-98 active:scale-95" href="#">
+<span class="material-symbols-outlined text-[16px]">sensors</span>
+<span>Live Stream</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-[#DCE5FD]/40 font-['JetBrains_Mono'] text-[12px] tracking-tight hover:bg-[#DCE5FD]/5 hover:text-[#DCE5FD] rounded-sm transition-colors scale-98 active:scale-95" href="#">
+<span class="material-symbols-outlined text-[16px]">history</span>
+<span>Historical</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-[#DCE5FD]/40 font-['JetBrains_Mono'] text-[12px] tracking-tight hover:bg-[#DCE5FD]/5 hover:text-[#DCE5FD] rounded-sm transition-colors scale-98 active:scale-95" href="#">
+<span class="material-symbols-outlined text-[16px]">hub</span>
+<span>Trace Map</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-[#DCE5FD]/40 font-['JetBrains_Mono'] text-[12px] tracking-tight hover:bg-[#DCE5FD]/5 hover:text-[#DCE5FD] rounded-sm transition-colors scale-98 active:scale-95" href="#">
+<span class="material-symbols-outlined text-[16px]">error</span>
+<span>Anomalies</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-[#DCE5FD]/40 font-['JetBrains_Mono'] text-[12px] tracking-tight hover:bg-[#DCE5FD]/5 hover:text-[#DCE5FD] rounded-sm transition-colors scale-98 active:scale-95" href="#">
+<span class="material-symbols-outlined text-[16px]">terminal</span>
+<span>System Log</span>
+</a>
+</nav>
+<div class="px-6 mt-auto mb-6">
+<button class="w-full bg-primary/10 hover:bg-primary/20 text-primary font-label text-[10px] uppercase tracking-widest py-2 rounded-sm border border-primary/20 transition-colors">Export Data</button>
+</div>
+<div class="mt-auto border-t border-outline-variant/30 pt-4 px-3 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 text-[#DCE5FD]/40 font-['JetBrains_Mono'] text-[12px] tracking-tight hover:bg-[#DCE5FD]/5 hover:text-[#DCE5FD] rounded-sm transition-colors" href="#">
+<span class="material-symbols-outlined text-[16px]">settings</span>
+<span>Settings</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-[#DCE5FD]/40 font-['JetBrains_Mono'] text-[12px] tracking-tight hover:bg-[#DCE5FD]/5 hover:text-[#DCE5FD] rounded-sm transition-colors" href="#">
+<span class="material-symbols-outlined text-[16px]">help</span>
+<span>Support</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Area (Unified Telemetry & Inspector) -->
+<main class="flex-1 flex overflow-hidden bg-surface-container-low">
+<!-- Center Column: Telemetry Feed -->
+<section class="flex flex-col w-[45%] min-w-[400px] border-r border-outline-variant/30 bg-surface-container-lowest h-full shadow-[inset_-10px_0_15px_-10px_rgba(0,0,0,0.5)]">
+<!-- Feed Header -->
+<div class="h-12 border-b border-outline-variant/30 flex items-center justify-between px-4 bg-surface-container-low flex-shrink-0 sticky top-0 z-10">
+<h3 class="font-label text-[10px] uppercase tracking-[0.1em] text-on-surface-variant flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px]">list</span>
+                        UNIFIED TELEMETRY FEED
+                    </h3>
+<div class="flex items-center gap-3">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-[14px] text-on-surface-variant">search</span>
+<input class="bg-surface-container-lowest border border-outline-variant/30 rounded-[2px] text-xs font-label py-1 pl-7 pr-2 w-48 text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary/50 focus:ring-0" placeholder="Filter events..." type="text"/>
+</div>
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[16px]">filter_list</span>
+</button>
+</div>
+</div>
+<!-- Feed List -->
+<div class="flex-1 overflow-y-auto custom-scrollbar">
+<!-- Event Item -->
+<div class="group flex items-start gap-3 p-3 border-b border-outline-variant/30 hover:bg-primary/5 cursor-pointer transition-colors">
+<div class="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0"></div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between mb-1">
+<span class="font-label text-xs text-primary font-medium">TOOL_CALL</span>
+<span class="font-label text-[10px] text-on-surface-variant">14:02:11.405</span>
+</div>
+<div class="font-label text-[11px] text-on-surface truncate">generate_report_v2</div>
+<div class="flex items-center gap-2 mt-1">
+<span class="px-1.5 py-0.5 rounded-[2px] bg-surface-container-highest border border-outline-variant/30 font-label text-[9px] text-on-surface-variant">user_id: 8492</span>
+<span class="font-label text-[10px] text-emerald-400">200 OK</span>
+<span class="font-label text-[10px] text-on-surface-variant ml-auto">124ms</span>
+</div>
+</div>
+</div>
+<!-- Event Item -->
+<div class="group flex items-start gap-3 p-3 border-b border-outline-variant/30 hover:bg-primary/5 cursor-pointer transition-colors">
+<div class="w-1.5 h-1.5 rounded-full bg-secondary mt-1.5 flex-shrink-0"></div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between mb-1">
+<span class="font-label text-xs text-secondary font-medium">HTTP_REQ</span>
+<span class="font-label text-[10px] text-on-surface-variant">14:02:10.992</span>
+</div>
+<div class="font-label text-[11px] text-on-surface truncate">GET /api/v1/metrics/aggregate</div>
+<div class="flex items-center gap-2 mt-1">
+<span class="px-1.5 py-0.5 rounded-[2px] bg-surface-container-highest border border-outline-variant/30 font-label text-[9px] text-on-surface-variant">region: us-east</span>
+<span class="font-label text-[10px] text-emerald-400">200 OK</span>
+<span class="font-label text-[10px] text-on-surface-variant ml-auto">45ms</span>
+</div>
+</div>
+</div>
+<!-- Event Item -->
+<div class="group flex items-start gap-3 p-3 border-b border-outline-variant/30 hover:bg-primary/5 cursor-pointer transition-colors">
+<div class="w-1.5 h-1.5 rounded-full bg-tertiary mt-1.5 flex-shrink-0"></div>
+<div class="flex-1 min-w-0">
+<div class="flex items-center justify-between mb-1">
+<span class="font-label text-xs text-tertiary-fixed-dim font-medium">DB_QUERY</span>
+<span class="font-label text-[10px] text-on-surface-variant">14:02:10.850</span>
+</div>
+<div class="font-label text-[11px] text-on-surface truncate text-opacity-80">SELECT id, status FROM tasks WHERE...</div>
+<div class="flex items-center gap-2 mt-1">
+<span class="px-1.5 py-0.5 rounded-[2px] bg-surface-container-highest border border-outline-variant/30 font-label text-[9px] text-on-surface-variant">pool: main</span>
+<span class="font-label text-[10px] text-emerald-400">SUCCESS</span>
+<span class="font-label text-[10px] text-on-surface-variant ml-auto">12ms</span>
+</div>
+</div>
+</div>
+<!-- Add a few more faint ones to show scrolling -->
+<div class="opacity-50 pointer-events-none p-3 border-b border-outline-variant/30">
+<div class="flex items-center justify-between mb-1">
+<span class="font-label text-xs text-secondary font-medium">HTTP_REQ</span>
+<span class="font-label text-[10px] text-on-surface-variant">14:02:09.112</span>
+</div>
+<div class="font-label text-[11px] text-on-surface truncate">POST /api/v1/ingest</div>
+</div>
+</div>
+</section>
+<!-- Right Column: Inspector Panel (No Selection State) -->
+<section class="flex-1 flex flex-col bg-surface h-full relative">
+<!-- Inspector Header -->
+<div class="h-12 border-b border-outline-variant/30 flex items-center px-6 bg-surface flex-shrink-0">
+<h3 class="font-label text-[10px] uppercase tracking-[0.1em] text-on-surface-variant flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px]">plumbing</span>
+                        INSPECTOR
+                    </h3>
+</div>
+<!-- Empty State Content -->
+<div class="flex-1 flex flex-col items-center justify-center p-8 text-center bg-surface-container-low shadow-[inset_0_2px_10px_rgba(0,0,0,0.2)]">
+<div class="w-16 h-16 rounded-full bg-surface-container-highest border border-outline-variant/30 flex items-center justify-center mb-6 shadow-sm">
+<span class="material-symbols-outlined text-[32px] text-on-surface-variant opacity-50 font-light">manage_search</span>
+</div>
+<h2 class="font-headline font-bold text-lg text-on-surface mb-2">No Event Selected</h2>
+<p class="font-body text-sm text-on-surface-variant max-w-md">Choose an event from the feed to view its summary, context identifiers, and raw payload details.</p>
+</div>
+<!-- Temporal Timeline (Quiet Bottom Area) -->
+<div class="h-48 border-t border-outline-variant/30 bg-surface-container-lowest flex flex-col flex-shrink-0">
+<div class="h-8 border-b border-outline-variant/30 flex items-center px-4 bg-surface-container-low">
+<span class="font-label text-[9px] uppercase tracking-[0.1em] text-on-surface-variant">Temporal Overview (Last 60s)</span>
+</div>
+<div class="flex-1 p-4 flex items-end gap-1 opacity-40">
+<!-- Simulated bar chart blocks -->
+<div class="w-2 bg-primary/40 rounded-t-[1px]" style="height: 20%"></div>
+<div class="w-2 bg-secondary/40 rounded-t-[1px]" style="height: 35%"></div>
+<div class="w-2 bg-primary/40 rounded-t-[1px]" style="height: 15%"></div>
+<div class="w-2 bg-tertiary-dim/40 rounded-t-[1px]" style="height: 60%"></div>
+<div class="w-2 bg-secondary/40 rounded-t-[1px]" style="height: 40%"></div>
+<div class="w-2 bg-primary/40 rounded-t-[1px]" style="height: 25%"></div>
+<div class="w-2 bg-primary/40 rounded-t-[1px]" style="height: 80%"></div>
+<div class="w-2 bg-secondary/40 rounded-t-[1px]" style="height: 30%"></div>
+<div class="w-2 bg-tertiary-dim/40 rounded-t-[1px]" style="height: 10%"></div>
+<div class="w-2 bg-primary/40 rounded-t-[1px]" style="height: 45%"></div>
+</div>
+</div>
+<!-- Operational Sources Overlay (Absolute positioned or integrated in a clever way. Let's dock it bottom right over the empty state area, before timeline) -->
+<div class="absolute bottom-52 right-4 w-64 bg-surface-container-high border border-outline-variant/30 rounded-[2px] shadow-lg">
+<div class="px-3 py-2 border-b border-outline-variant/30 flex justify-between items-center">
+<span class="font-label text-[9px] uppercase tracking-[0.1em] text-on-surface-variant">Active Sources</span>
+<div class="flex gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+</div>
+</div>
+<div class="p-2 space-y-1">
+<div class="flex items-center justify-between px-2 py-1 bg-surface-container-lowest rounded-[2px]">
+<span class="font-label text-[10px] text-on-surface">Codex App Server</span>
+<span class="font-label text-[9px] text-emerald-400">ACTIVE</span>
+</div>
+<div class="flex items-center justify-between px-2 py-1 bg-surface-container-lowest rounded-[2px]">
+<span class="font-label text-[10px] text-on-surface">Ingest Worker 01</span>
+<span class="font-label text-[9px] text-emerald-400">ACTIVE</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+</div>
+<style>
+        /* Custom scrollbar for data density areas */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #3F485A;
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #6C768A;
+        }
+    </style>
+</body></html>

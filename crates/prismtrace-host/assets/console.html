@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+
+<html class="light" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title data-i18n="app.title">PrismTrace Console IA v2 - Light</title>
+<link href="/assets/console-utilities.css" rel="stylesheet"/>
+<link href="/assets/console-base.css" rel="stylesheet"/>
+<link href="/assets/console-theme-light.css" id="theme-stylesheet" rel="stylesheet"/>
+<style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #0f172a; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        .btn-primary {
+            background: #2563eb;
+            color: #ffffff;
+        }
+
+        .text-primary { color: #2563eb !important; }
+        .text-secondary { color: #059669 !important; }
+        .text-tertiary { color: #d97706 !important; }
+        .text-error { color: #dc2626 !important; }
+        .text-on-primary { color: #ffffff !important; }
+        .text-on-surface { color: #0f172a !important; }
+        .text-on-surface-variant { color: #475569 !important; }
+        .text-on-background { color: #0f172a !important; }
+        .bg-primary { background-color: #2563eb !important; }
+        .bg-secondary { background-color: #059669 !important; }
+        .bg-error { background-color: #dc2626 !important; }
+        .bg-surface { background-color: #ffffff !important; }
+        .bg-background { background-color: #f8fafc !important; }
+        .bg-surface-container-lowest { background-color: #ffffff !important; }
+        .bg-surface-container-low { background-color: #f8fafc !important; }
+        .bg-surface-container { background-color: #f1f5f9 !important; }
+        .bg-surface-container-high { background-color: #f1f5f9 !important; }
+        .bg-surface-container-highest { background-color: #e2e8f0 !important; }
+        .bg-primary-container { background-color: #dbeafe !important; }
+        .bg-secondary-container { background-color: #d1fae5 !important; }
+        .bg-primary\/5 { background-color: rgba(37, 99, 235, 0.05) !important; }
+        .bg-primary\/10 { background-color: rgba(37, 99, 235, 0.10) !important; }
+        .bg-primary\/20 { background-color: rgba(37, 99, 235, 0.20) !important; }
+        .bg-secondary\/10 { background-color: rgba(5, 150, 105, 0.10) !important; }
+        .bg-error\/10 { background-color: rgba(220, 38, 38, 0.10) !important; }
+        .border-primary { border-color: #2563eb !important; }
+        .border-secondary { border-color: #059669 !important; }
+        .border-error { border-color: #dc2626 !important; }
+        .border-outline { border-color: #94a3b8 !important; }
+        .border-outline-variant { border-color: #e2e8f0 !important; }
+        .border-primary\/10 { border-color: rgba(37, 99, 235, 0.10) !important; }
+        .border-primary\/20 { border-color: rgba(37, 99, 235, 0.20) !important; }
+        .border-primary\/30 { border-color: rgba(37, 99, 235, 0.30) !important; }
+        .border-secondary\/20 { border-color: rgba(5, 150, 105, 0.20) !important; }
+        .border-secondary\/30 { border-color: rgba(5, 150, 105, 0.30) !important; }
+        .border-error\/10 { border-color: rgba(220, 38, 38, 0.10) !important; }
+        .border-outline-variant\/10 { border-color: rgba(226, 232, 240, 0.10) !important; }
+        .border-outline-variant\/30 { border-color: rgba(226, 232, 240, 0.30) !important; }
+    </style>
+</head>
+<body class="console-app h-screen w-full flex flex-col overflow-hidden bg-surface text-on-surface text-sm" data-theme="light" data-initial-session-id="__INITIAL_SESSION_ID__" data-initial-request-id="__INITIAL_REQUEST_ID__">
+<!-- TopNavBar -->
+<header class="bg-surface text-primary font-['Inter'] tracking-tight text-sm docked full-width top-0 h-12 flex justify-between items-center px-4 w-full z-50 shrink-0 border-b border-outline-variant">
+<div class="flex items-center gap-6">
+<div class="text-lg font-black tracking-tighter text-primary">PRISMTRACE</div>
+</div>
+<!-- Top Nav Actions: Layout Controls -->
+<div class="flex items-center gap-2">
+<!-- Left Sidebar Open Toggle (Active) -->
+<button class="p-1 flex items-center justify-center opacity-100 transition-opacity" data-layout-toggle="left" title="Toggle Left Sidebar" type="button">
+<svg fill="none" height="14" viewbox="0 0 18 14" width="18" xmlns="http://www.w3.org/2000/svg">
+<rect height="13" rx="1" stroke="currentColor" stroke-width="1" width="17" x="0.5" y="0.5"></rect>
+<rect fill="currentColor" height="13" rx="0.5" width="5" x="0.5" y="0.5"></rect>
+<line stroke="currentColor" stroke-opacity="0.2" stroke-width="1" x1="6" x2="6" y1="0.5" y2="13.5"></line>
+</svg>
+</button>
+<!-- Right Sidebar Closed Toggle (Inactive) -->
+<button class="p-1 flex items-center justify-center opacity-40 hover:opacity-100 transition-opacity" data-layout-toggle="right" title="Toggle Right Sidebar" type="button">
+<svg fill="none" height="14" viewbox="0 0 18 14" width="18" xmlns="http://www.w3.org/2000/svg">
+<rect height="13" rx="1" stroke="currentColor" stroke-width="1" width="17" x="0.5" y="0.5"></rect>
+<rect fill="transparent" height="13" rx="0.5" stroke="currentColor" stroke-dasharray="2 2" width="5" x="12.5" y="0.5"></rect>
+<line stroke="currentColor" stroke-opacity="0.2" stroke-width="1" x1="12" x2="12" y1="0.5" y2="13.5"></line>
+</svg>
+</button>
+</div>
+</header>
+<!-- Main Workspace Layout -->
+<main class="flex-1 flex overflow-hidden w-full relative">
+<!-- Left SideNavBar (Session Browser) -->
+<aside class="console-sidebar bg-surface-container-low text-on-surface-variant font-['Inter'] text-xs flex flex-col h-full w-64 shrink-0 border-r border-outline-variant z-40 relative" id="left-sidebar">
+<!-- Header -->
+<div class="p-4 border-b border-outline-variant flex justify-between items-center bg-surface-container-lowest">
+<div>
+<h2 class="font-headline text-on-surface normal-case text-sm font-semibold tracking-tight" data-i18n="sessions.title">Sessions</h2>
+</div>
+<div class="flex gap-1">
+<button class="p-1 text-on-surface-variant hover:text-on-surface transition-colors rounded hover:bg-surface-container-high" data-refresh type="button"><span class="material-symbols-outlined text-[16px]">refresh</span></button>
+<button class="p-1 text-on-surface-variant hover:text-on-surface transition-colors rounded hover:bg-surface-container-high" data-refresh type="button"><span class="material-symbols-outlined text-[16px]">sync</span></button>
+<button class="p-1 text-on-surface-variant hover:text-on-surface transition-colors rounded hover:bg-surface-container-high" type="button"><span class="material-symbols-outlined text-[16px]">filter_list</span></button>
+</div>
+</div>
+<!-- Agent Runtime Dropdown -->
+<div class="p-3 bg-surface m-2 rounded relative z-50 border border-outline-variant shadow-sm">
+<button class="flex justify-between items-center text-on-surface normal-case mb-2 cursor-pointer font-medium text-xs w-full" data-runtime-dropdown type="button">
+<span class="flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+                        Agent Runtime
+                    </span>
+<span class="material-symbols-outlined text-[16px]">expand_less</span>
+</button>
+<input class="w-full bg-surface-container-low border border-outline-variant/30 rounded text-on-surface px-2 py-1.5 mb-2 focus:ring-1 focus:ring-primary focus:border-primary font-mono text-[10px]" data-i18n-placeholder="runtime.search" id="runtime-search" placeholder="Filter runtimes..." type="search"/>
+<ul class="space-y-0.5 normal-case font-mono text-[10px] tracking-normal" id="runtime-list-region">
+<li class="px-2 py-1.5 rounded hover:bg-surface-container-high text-on-surface cursor-pointer">All runtimes</li>
+<li class="px-2 py-1.5 rounded bg-primary-container text-primary font-semibold cursor-pointer flex justify-between items-center">
+<span>Codex Desktop</span>
+<span class="material-symbols-outlined text-[14px]">check</span>
+</li>
+<li class="px-2 py-1.5 rounded hover:bg-surface-container-high text-on-surface-variant cursor-pointer">opencode</li>
+<li class="px-2 py-1.5 rounded hover:bg-surface-container-high text-on-surface-variant cursor-pointer">Claude Code</li>
+</ul>
+</div>
+<!-- Session List -->
+<div class="flex-1 overflow-y-auto mt-2" id="session-list-region">
+<div class="px-3 py-1 text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-widest mb-1">PRISMTRACE</div>
+<div class="space-y-0.5 px-2 mb-4">
+<!-- Selected Session -->
+<div class="group relative bg-surface-container-high rounded cursor-pointer border border-primary/20 text-primary">
+<div class="absolute left-0 top-0 bottom-0 w-0.5 bg-primary rounded-l"></div>
+<div class="p-2 normal-case flex gap-2">
+<span class="material-symbols-outlined text-[14px] mt-0.5" style="font-variation-settings: 'FILL' 1;">terminal</span>
+<div class="flex-1 min-w-0">
+<div class="font-mono text-[10px] font-bold truncate mb-0.5">[Codex] 接入 Codex Observer UI</div>
+<div class="text-[9px] text-on-surface-variant tracking-normal">Active · 160 events</div>
+</div>
+</div>
+</div>
+<div class="group relative hover:bg-surface-container-high transition-all duration-200 rounded cursor-pointer text-on-surface-variant">
+<div class="p-2 normal-case flex gap-2">
+<span class="material-symbols-outlined text-[14px] mt-0.5">terminal</span>
+<div class="flex-1 min-w-0">
+<div class="font-mono text-[10px] truncate mb-0.5">[opencode] 接入 opencode observer</div>
+<div class="text-[9px] opacity-60 tracking-normal">2h ago · 42 events</div>
+</div>
+</div>
+</div>
+<div class="group relative hover:bg-surface-container-high transition-all duration-200 rounded cursor-pointer text-on-surface-variant">
+<div class="p-2 normal-case flex gap-2">
+<span class="material-symbols-outlined text-[14px] mt-0.5">terminal</span>
+<div class="flex-1 min-w-0">
+<div class="font-mono text-[10px] truncate mb-0.5">[Codex] 生成模块页设计稿</div>
+<div class="text-[9px] opacity-60 tracking-normal">Yesterday · 215 events</div>
+</div>
+</div>
+</div>
+</div>
+<div class="px-3 py-1 text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-widest mb-1 mt-4">PRAXIS-DEVOS</div>
+<div class="space-y-0.5 px-2">
+<div class="group relative hover:bg-surface-container-high transition-all duration-200 rounded cursor-pointer text-on-surface-variant">
+<div class="p-2 normal-case flex gap-2">
+<span class="material-symbols-outlined text-[14px] mt-0.5">terminal</span>
+<div class="flex-1 min-w-0">
+<div class="font-mono text-[10px] truncate mb-0.5">[Codex] 列出 superpowers 全部 skill</div>
+<div class="text-[9px] opacity-60 tracking-normal">3 days ago · 12 events</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</aside>
+<!-- Center Area: Transcript Timeline -->
+<section class="console-canvas flex-1 flex flex-col min-w-0 bg-surface relative z-10 border-x border-outline-variant">
+<!-- Header -->
+<div class="px-6 py-4 border-b border-outline-variant flex justify-between items-end bg-surface-container-low shrink-0">
+<div>
+<h1 class="font-headline text-xl text-on-surface font-bold tracking-tight mb-1" id="session-title-region">接入 Codex Observer UI</h1>
+<div class="font-mono text-[10px] text-on-surface-variant flex items-center gap-2" id="session-meta-region">
+<span class="text-primary font-bold">Codex Desktop</span>
+<span class="opacity-30">|</span>
+<span class="truncate max-w-[300px]" title="/Volumes/MacData/workspace/PrismTrace">/Volumes/MacData/workspace/PrismTrace</span>
+<span class="opacity-30">|</span>
+<span>160 events</span>
+</div>
+</div>
+<div class="flex gap-2">
+<button class="p-1.5 text-on-surface-variant hover:text-on-surface transition-colors rounded hover:bg-surface-container-high" data-scroll-bottom type="button"><span class="material-symbols-outlined text-[18px]">south</span></button>
+<button class="p-1.5 text-on-surface-variant hover:text-on-surface transition-colors rounded hover:bg-surface-container-high" data-refresh type="button"><span class="material-symbols-outlined text-[18px]">sync</span></button>
+</div>
+</div>
+<!-- Filter/Query Bar -->
+<div class="px-6 py-2 bg-surface border-b border-outline-variant flex items-center gap-2 overflow-x-auto shrink-0 no-scrollbar">
+<span class="material-symbols-outlined text-on-surface-variant text-[16px] mr-1">filter_list</span>
+<div class="flex gap-1.5">
+<input class="w-36 px-2.5 py-1 rounded-sm bg-surface-container-high text-on-surface text-[11px] font-medium hover:bg-outline-variant transition-colors border border-outline-variant focus:ring-1 focus:ring-primary focus:border-primary" data-i18n-placeholder="timeline.keyword" id="timeline-keyword" placeholder="Keyword" type="search"/>
+<button class="px-2.5 py-1 rounded-sm bg-surface-container-high text-on-surface text-[11px] font-medium hover:bg-outline-variant transition-colors border border-outline-variant">Kind <span class="material-symbols-outlined text-[12px] align-middle ml-0.5">arrow_drop_down</span></button>
+<button class="px-2.5 py-1 rounded-sm bg-surface-container-high text-on-surface text-[11px] font-medium hover:bg-outline-variant transition-colors border border-outline-variant">Role <span class="material-symbols-outlined text-[12px] align-middle ml-0.5">arrow_drop_down</span></button>
+<button class="px-2.5 py-1 rounded-sm bg-surface-container-high text-on-surface text-[11px] font-medium hover:bg-outline-variant transition-colors border border-outline-variant">Tool <span class="material-symbols-outlined text-[12px] align-middle ml-0.5">arrow_drop_down</span></button>
+<button class="px-2.5 py-1 rounded-sm bg-surface-container-high text-on-surface text-[11px] font-medium hover:bg-outline-variant transition-colors border border-outline-variant">File <span class="material-symbols-outlined text-[12px] align-middle ml-0.5">arrow_drop_down</span></button>
+<button class="px-2.5 py-1 rounded-sm bg-surface-container-high text-on-surface text-[11px] font-medium hover:bg-outline-variant transition-colors border border-outline-variant">Error</button>
+<div class="w-px h-4 bg-outline-variant self-center mx-1"></div>
+<button class="px-2.5 py-1 rounded-sm bg-primary/10 text-primary text-[11px] font-bold hover:bg-primary/20 transition-colors border border-primary/20 flex items-center gap-1" data-selected-only type="button">
+                        Selected only
+                    </button>
+</div>
+</div>
+<!-- Transcript Timeline Layout -->
+<div class="flex-1 overflow-y-auto px-2 py-4 bg-surface-container-low/50" id="transcript-region">
+<!-- Item 1: User Message -->
+<div class="flex group hover:bg-surface transition-colors rounded p-1 mb-2">
+<div class="w-8 shrink-0 flex flex-col items-center pt-2">
+<input class="w-3.5 h-3.5 rounded-sm bg-surface border-outline text-primary focus:ring-primary cursor-pointer" type="checkbox"/>
+</div>
+<div class="w-10 shrink-0 pt-1.5 flex justify-center">
+<div class="w-6 h-6 rounded bg-surface-container-highest border border-outline-variant flex items-center justify-center text-on-surface">
+<span class="material-symbols-outlined text-[14px]">person</span>
+</div>
+</div>
+<div class="flex-1 min-w-0 pt-1.5 pb-2 pr-4">
+<div class="flex items-baseline gap-2 mb-1">
+<span class="font-headline text-xs font-bold text-on-surface uppercase tracking-wider">User</span>
+<span class="font-mono text-[9px] text-on-surface-variant/60">14:22:05.102</span>
+</div>
+<div class="text-[13px] text-on-surface leading-relaxed">解释看看 console.js 里为什么 WebSocket 连接状态总是不同步？</div>
+</div>
+</div>
+<!-- Item 2: Context Block -->
+<div class="flex group bg-primary/5 border border-primary/20 transition-colors rounded p-1 mb-2">
+<div class="w-8 shrink-0 flex flex-col items-center pt-2">
+<input checked="" class="w-3.5 h-3.5 rounded-sm bg-primary border-primary text-on-primary focus:ring-primary cursor-pointer" type="checkbox"/>
+</div>
+<div class="w-10 shrink-0 pt-1.5 flex justify-center">
+<div class="w-6 h-6 rounded bg-surface-container-highest border border-outline-variant flex items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined text-[14px]">description</span>
+</div>
+</div>
+<div class="flex-1 min-w-0 pt-1.5 pb-2 pr-4">
+<div class="flex items-baseline gap-2 mb-1">
+<span class="font-headline text-xs font-bold text-on-surface-variant uppercase tracking-wider">Context</span>
+<span class="font-mono text-[9px] text-on-surface-variant/60">14:22:05.150</span>
+</div>
+<div class="mt-1 bg-surface border border-primary/20 rounded cursor-pointer hover:border-primary/40 transition-colors">
+<div class="px-3 py-2 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-primary">chevron_right</span>
+<span class="font-mono text-xs text-on-surface font-medium">AGENTS.md</span>
+<span class="text-[10px] text-on-surface-variant">120 lines</span>
+</div>
+<span class="text-[10px] text-primary font-mono font-bold bg-primary/10 px-1.5 py-0.5 rounded">Selected</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Item 3: Codex Reply -->
+<div class="flex group hover:bg-surface transition-colors rounded p-1 mb-2">
+<div class="w-8 shrink-0 flex flex-col items-center pt-2">
+<input class="w-3.5 h-3.5 rounded-sm bg-surface border-outline text-primary focus:ring-primary cursor-pointer" type="checkbox"/>
+</div>
+<div class="w-10 shrink-0 pt-1.5 flex justify-center">
+<div class="w-6 h-6 rounded bg-white border border-primary/30 flex items-center justify-center text-primary shadow-sm">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;">smart_toy</span>
+</div>
+</div>
+<div class="flex-1 min-w-0 pt-1.5 pb-2 pr-4">
+<div class="flex items-baseline gap-2 mb-1">
+<span class="font-headline text-xs font-bold text-primary uppercase tracking-wider">Codex</span>
+<span class="font-mono text-[9px] text-on-surface-variant/60">14:22:08.441</span>
+</div>
+<div class="text-[13px] text-on-surface leading-relaxed">我来看看。看起来是 `ui/console.js` 中的 WebSocket 重连逻辑在某些竞态条件下没有正确更新内部的状态指示器。让我检查一下文件内容。</div>
+</div>
+</div>
+<!-- Item 4: Tool Call -->
+<div class="flex group bg-primary/5 border border-primary/20 transition-colors rounded p-1 mb-2">
+<div class="w-8 shrink-0 flex flex-col items-center pt-2 relative">
+<div class="absolute top-6 bottom-0 w-px bg-outline-variant -z-10"></div>
+<input checked="" class="w-3.5 h-3.5 rounded-sm bg-primary border-primary text-on-primary focus:ring-primary cursor-pointer" type="checkbox"/>
+</div>
+<div class="w-10 shrink-0 pt-1.5 flex justify-center">
+<div class="w-6 h-6 rounded bg-secondary-container border border-secondary/30 flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[14px]">build</span>
+</div>
+</div>
+<div class="flex-1 min-w-0 pt-1.5 pb-2 pr-4">
+<div class="flex items-baseline gap-2 mb-1">
+<span class="font-headline text-xs font-bold text-secondary uppercase tracking-wider">Tool Call</span>
+<span class="font-mono text-[9px] text-on-surface-variant/60">14:22:09.100</span>
+<span class="ml-auto text-[10px] text-secondary font-mono font-bold bg-secondary/10 px-1.5 py-0.5 rounded border border-secondary/20 flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span> Running
+                            </span>
+</div>
+<div class="mt-1 bg-white rounded border border-primary/10 shadow-sm overflow-hidden">
+<div class="px-3 py-2 border-b border-outline-variant bg-surface-container-low flex items-center gap-2">
+<span class="font-mono text-[11px] text-on-surface font-bold">exec_command</span>
+</div>
+<div class="p-3">
+<pre class="font-mono text-[11px] text-on-surface-variant overflow-x-auto"><code><span class="text-primary font-bold">"command"</span>: <span class="text-tertiary">"cat src/ui/console.js | grep -n -C 5 WebSocket"</span></code></pre>
+</div>
+</div>
+</div>
+</div>
+<!-- Item 5: Tool Result -->
+<div class="flex group hover:bg-surface transition-colors rounded p-1 mb-2">
+<div class="w-8 shrink-0 flex flex-col items-center pt-2 relative">
+<div class="absolute top-0 bottom-0 w-px bg-outline-variant -z-10"></div>
+<input class="w-3.5 h-3.5 rounded-sm bg-surface border-outline text-primary focus:ring-primary cursor-pointer" type="checkbox"/>
+</div>
+<div class="w-10 shrink-0 pt-1.5 flex justify-center">
+<div class="w-6 h-6 rounded bg-surface-container-highest border border-outline-variant flex items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined text-[14px]">output</span>
+</div>
+</div>
+<div class="flex-1 min-w-0 pt-1.5 pb-2 pr-4">
+<div class="flex items-baseline gap-2 mb-1">
+<span class="font-headline text-xs font-bold text-on-surface-variant uppercase tracking-wider">Result</span>
+<span class="font-mono text-[9px] text-on-surface-variant/60">14:22:09.850</span>
+</div>
+<div class="mt-1 bg-surface-container-highest rounded border border-outline-variant relative group-hover:border-primary/20 transition-colors">
+<div class="absolute right-2 top-2">
+<span class="font-mono text-[9px] text-on-surface-variant font-bold bg-white/50 px-1.5 py-0.5 rounded">stdout</span>
+</div>
+<div class="p-3 pt-6 overflow-x-auto">
+<pre class="font-mono text-[11px] text-on-surface leading-relaxed"><code>42-  connect() {
+43-    if (this.ws &amp;&amp; this.ws.readyState === WebSocket.OPEN) return;
+44-    
+45-    this.state = 'connecting';
+46-    this.emit('stateChange', this.state);
+47:    this.ws = new WebSocket(this.url);
+48-    
+49-    this.ws.onopen = () =&gt; {
+50-      // BUG? state is not updated immediately
+51-      setTimeout(() =&gt; {
+52-        this.state = 'connected';</code></pre>
+</div>
+</div>
+</div>
+</div>
+<!-- Item 6: File Diff -->
+<div class="flex group bg-primary/5 border border-primary/20 transition-colors rounded p-1 mb-2">
+<div class="w-8 shrink-0 flex flex-col items-center pt-2">
+<input checked="" class="w-3.5 h-3.5 rounded-sm bg-primary border-primary text-on-primary focus:ring-primary cursor-pointer" type="checkbox"/>
+</div>
+<div class="w-10 shrink-0 pt-1.5 flex justify-center">
+<div class="w-6 h-6 rounded bg-primary-container border border-primary/30 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[14px]">difference</span>
+</div>
+</div>
+<div class="flex-1 min-w-0 pt-1.5 pb-2 pr-4">
+<div class="flex items-baseline gap-2 mb-1">
+<span class="font-headline text-xs font-bold text-primary uppercase tracking-wider">File Diff</span>
+<span class="font-mono text-[9px] text-on-surface-variant/60">14:22:15.002</span>
+</div>
+<div class="mt-1 bg-white rounded border border-primary/20 overflow-hidden shadow-sm">
+<div class="px-3 py-2 border-b border-outline-variant bg-surface-container-low flex justify-between items-center">
+<div class="font-mono text-xs text-on-surface font-bold">src/ui/console.js</div>
+<div class="flex gap-2 text-[10px] font-mono">
+<span class="text-error font-bold">-2</span>
+<span class="text-secondary font-bold">+2</span>
+</div>
+</div>
+<div class="p-2 overflow-x-auto font-mono text-[11px] leading-relaxed">
+<div class="text-on-surface-variant/50 px-2">@@ -47,8 +47,8 @@</div>
+<div class="px-2">    this.ws = new WebSocket(this.url);</div>
+<div class="px-2"> </div>
+<div class="px-2">    this.ws.onopen = () =&gt; {</div>
+<div class="bg-error/10 text-error px-2 border-l-2 border-error">-      // BUG? state is not updated immediately</div>
+<div class="bg-error/10 text-error px-2 border-l-2 border-error">-      setTimeout(() =&gt; {</div>
+<div class="bg-secondary/10 text-secondary px-2 border-l-2 border-secondary">+      this.state = 'connected';</div>
+<div class="bg-secondary/10 text-secondary px-2 border-l-2 border-secondary">+      this.emit('stateChange', this.state);</div>
+<div class="px-2">        this.state = 'connected';</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Selection Toolbar - Pinned at the bottom -->
+<div class="bg-surface-container-highest px-6 py-2.5 flex justify-between items-center shrink-0 border-t border-outline-variant z-30" id="selection-toolbar-region">
+<div class="flex items-center gap-3">
+<span class="text-primary font-mono text-[11px] font-bold bg-primary/10 px-2.5 py-1 rounded-sm border border-primary/20 uppercase tracking-tighter" id="selection-count-region">已选 3 条</span>
+</div>
+<div class="flex gap-3">
+<button class="text-[11px] font-bold text-on-primary px-4 py-1.5 rounded-sm bg-primary hover:brightness-110 transition-all flex items-center gap-1.5 shadow-sm" data-add-to-analysis type="button">
+<span class="material-symbols-outlined text-[14px]">arrow_forward</span>
+                        加入分析
+                    </button>
+<button class="text-[11px] font-bold text-on-surface-variant px-3 py-1.5 rounded-sm hover:bg-white transition-colors" data-clear-selection type="button">清空选择</button>
+</div>
+</div>
+</section>
+<!-- Right SideNavBar: Analysis Chat -->
+<aside class="console-rightbar bg-surface text-on-surface font-['Inter'] text-xs flex flex-col h-full w-80 shrink-0 border-l border-outline-variant relative z-40 shadow-[-4px_0_12px_rgba(0,0,0,0.05)]" id="right-sidebar">
+<!-- Header -->
+<div class="px-4 py-4 border-b border-outline-variant bg-surface-container-low shrink-0">
+<div class="flex justify-between items-center mb-1">
+<h2 class="font-headline text-on-surface text-sm font-bold tracking-tight">Analysis Chat</h2>
+<button class="text-on-surface-variant hover:text-on-surface transition-opacity"><span class="material-symbols-outlined text-[16px]">more_vert</span></button>
+</div>
+<div class="flex justify-between items-center">
+<div class="text-[10px] text-on-surface-variant">Backend: <span class="text-primary font-bold">Codex CLI</span> <span class="material-symbols-outlined text-[12px] align-middle ml-0.5 cursor-pointer">expand_more</span></div>
+<div class="flex items-center gap-1.5 text-[9px] font-mono font-bold text-secondary px-1.5 py-0.5 rounded bg-secondary/10 border border-secondary/20">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span> running
+                    </div>
+</div>
+</div>
+<!-- Diagnostics Panel -->
+<div class="m-3 p-3 rounded bg-surface-container border border-outline-variant shadow-sm shrink-0" id="diagnostics-panel-region"></div>
+<!-- Context Card -->
+<div class="m-3 p-3 rounded bg-surface-container border border-outline-variant shadow-sm shrink-0">
+<div class="flex justify-between items-center mb-1.5">
+<div class="font-headline text-xs font-bold text-on-surface flex items-center gap-1.5 uppercase tracking-wide">
+<span class="material-symbols-outlined text-[14px] text-primary">data_object</span>
+                        Selected Context
+                    </div>
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined text-[14px]">edit</span></button>
+</div>
+<div class="font-mono text-[10px] text-primary font-bold" id="analysis-context-summary">3 transcript items attached</div>
+<div class="mt-2 flex flex-wrap gap-1" id="analysis-context-chips">
+<span class="px-1.5 py-0.5 rounded-sm bg-white text-[9px] text-on-surface-variant border border-outline-variant truncate max-w-[100px]">AGENTS.md</span>
+<span class="px-1.5 py-0.5 rounded-sm bg-white text-[9px] text-secondary border border-secondary/20 flex items-center gap-0.5 font-bold"><span class="material-symbols-outlined text-[10px]">build</span> exec_cmd</span>
+<span class="px-1.5 py-0.5 rounded-sm bg-white text-[9px] text-primary border border-primary/20 flex items-center gap-0.5 font-bold"><span class="material-symbols-outlined text-[10px]">difference</span> Diff</span>
+</div>
+</div>
+<!-- Message Stream -->
+<div class="flex-1 overflow-y-auto p-4 space-y-4 bg-surface-container-low/30" id="analysis-message-region">
+<div class="flex flex-col items-end">
+<div class="bg-primary text-on-primary p-2.5 rounded-lg rounded-tr-sm max-w-[90%] text-[13px] leading-relaxed shadow-sm">
+                        Based on the selected events, why is the Codex agent changing those lines in console.js? Did the tool output suggest a timing issue?
+                    </div>
+<div class="text-[9px] text-on-surface-variant mt-1 font-mono">14:24:10</div>
+</div>
+<div class="flex flex-col items-start">
+<div class="flex items-center gap-2 mb-1">
+<div class="w-5 h-5 rounded bg-primary-container flex items-center justify-center text-primary border border-primary/20">
+<span class="material-symbols-outlined text-[12px]">terminal</span>
+</div>
+<span class="font-headline text-[10px] font-bold text-primary uppercase">Codex CLI</span>
+</div>
+<div class="bg-white text-on-surface p-3 rounded-lg rounded-tl-sm w-full text-[13px] leading-relaxed border border-outline-variant shadow-sm">
+                        Yes. Looking at the <code class="font-mono text-[11px] text-primary bg-primary/5 px-1 rounded border border-primary/10">exec_command</code> result for `console.js` (lines 47-52):
+                        <br/><br/>
+                        The original code had a `setTimeout` wrapping the state update to `connected`. The tool output comments explicitly say: <code class="font-mono text-[11px] text-error bg-error/5 px-1 rounded border border-error/10">// BUG? state is not updated immediately</code>.
+                        <br/><br/>
+                        The agent applied a diff to remove the timeout and update the state synchronously immediately after `new WebSocket()` is instantiated.
+                    </div>
+</div>
+</div>
+<!-- Composer -->
+<div class="p-3 bg-surface-container-low shrink-0 border-t border-outline-variant">
+<div class="relative bg-white rounded border border-outline focus-within:border-primary transition-colors p-2 shadow-inner">
+<textarea class="w-full bg-transparent border-none text-on-surface text-[13px] resize-none focus:ring-0 p-1 placeholder:text-on-surface-variant/40 font-mono" placeholder="Ask Codex CLI about selected context..." rows="3"></textarea>
+<div class="flex justify-between items-center mt-2 pt-2 border-t border-outline-variant/10">
+<div class="flex gap-1">
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Add File">
+<span class="material-symbols-outlined text-[16px]">attach_file</span>
+</button>
+<button class="p-1 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="Settings">
+<span class="material-symbols-outlined text-[16px]">tune</span>
+</button>
+</div>
+<div class="flex gap-2">
+<button class="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center shadow hover:brightness-110 transition-all" title="Send">
+<span class="material-symbols-outlined text-[18px]">north</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</aside>
+</main>
+<script src="/assets/console.js?v=ia-v2-light-exact-20260430"></script>
+</body></html>
