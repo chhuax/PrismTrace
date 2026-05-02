@@ -3,6 +3,7 @@ name = "prismtrace-host"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
+default-run = "prismtrace-host"
 
 [dependencies]
 prismtrace-analysis = { path = "../prismtrace-analysis" }
@@ -21,3 +22,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "prismtrace-host"
 path = "src/main.rs"
+
+[[bin]]
+name = "prismtrace"
+path = "src/bin/prismtrace.rs"
