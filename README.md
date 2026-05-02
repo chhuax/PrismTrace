@@ -29,6 +29,44 @@ PrismTrace V1 is scoped to:
 - payload visibility first
 - local-first storage and privacy
 
+## Alpha Install
+
+PrismTrace alpha releases are distributed as unsigned macOS tarballs. The first release kit targets Apple Silicon macOS (`aarch64-apple-darwin`). Homebrew, `.pkg`, `.dmg`, codesigning, and notarization are not available yet.
+
+Download the latest `prismtrace-*-aarch64-apple-darwin.tar.gz` archive from GitHub Releases, then install:
+
+```bash
+tar -xzf prismtrace-*-aarch64-apple-darwin.tar.gz
+cd prismtrace-*-aarch64-apple-darwin
+./install.sh --prefix "$HOME/.local"
+```
+
+Make sure the install prefix is on your `PATH`:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Smoke test the installed command:
+
+```bash
+prismtrace --discover
+```
+
+Start the local console:
+
+```bash
+prismtrace --console
+```
+
+Observer entrypoints are also exposed through the installed command:
+
+```bash
+prismtrace --codex-observe
+prismtrace --claude-observe
+prismtrace --opencode-observe
+```
+
 ## Longer-Term Vision
 
 PrismTrace is not only a payload capture utility. The broader direction is AI observability:
@@ -52,6 +90,7 @@ The first step is to build a trustworthy local fact layer for later analysis.
 cargo test
 cargo run -p prismtrace-host
 cargo run -p prismtrace-host -- --discover
+cargo run -p prismtrace-host --bin prismtrace -- --discover
 cargo run -p prismtrace-host -- --readiness
 cargo run -p prismtrace-host -- --attach <pid>
 ```
@@ -64,6 +103,7 @@ Start the local observability console with:
 
 ```bash
 cargo run -p prismtrace-host -- --console
+cargo run -p prismtrace-host --bin prismtrace -- --console
 ```
 
 Limit the console to specific target identities with repeatable `--target` flags:
