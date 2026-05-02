@@ -31,13 +31,25 @@ PrismTrace V1 当前边界是：
 
 ## Alpha 安装
 
-PrismTrace alpha 版本以未签名的 macOS tarball 分发。第一版 release kit 面向 Apple Silicon macOS（`aarch64-apple-darwin`）。Homebrew、`.pkg`、`.dmg`、codesign 和 notarization 暂未提供。
-
-从 GitHub Releases 下载最新的 `prismtrace-*-aarch64-apple-darwin.tar.gz`，然后安装：
+PrismTrace alpha 版本支持 Apple Silicon 和 Intel macOS。推荐使用 Homebrew 安装：
 
 ```bash
-tar -xzf prismtrace-*-aarch64-apple-darwin.tar.gz
-cd prismtrace-*-aarch64-apple-darwin
+brew install chhuax/tap/prismtrace
+```
+
+GitHub Releases 也会提供未签名的 macOS tarball，分别面向 Apple Silicon（`aarch64-apple-darwin`）和 Intel（`x86_64-apple-darwin`）。`.pkg`、`.dmg`、codesign 和 notarization 暂未提供。
+
+如果使用 tarball，请先下载与你的 Mac 架构匹配的最新 archive，然后运行：
+
+```bash
+case "$(uname -m)" in
+  arm64) target="aarch64-apple-darwin" ;;
+  x86_64) target="x86_64-apple-darwin" ;;
+  *) echo "unsupported macOS architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+
+tar -xzf prismtrace-*-"$target".tar.gz
+cd prismtrace-*-"$target"
 ./install.sh --prefix "$HOME/.local"
 ```
 
