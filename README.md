@@ -79,6 +79,110 @@ prismtrace --claude-observe
 prismtrace --opencode-observe
 ```
 
+## Quick Start
+
+PrismTrace is local-first. Run commands from the workspace you want to observe; PrismTrace writes state under that directory's `.prismtrace/` folder.
+
+Start with discovery:
+
+```bash
+cd /path/to/your/project
+prismtrace --discover
+```
+
+Open the local console:
+
+```bash
+prismtrace --console
+```
+
+Then visit `http://127.0.0.1:7799`. The console currently shows discovered targets, observer/source health, sessions, timeline events, request details, capabilities, and diagnostics.
+
+For a focused console view:
+
+```bash
+prismtrace --console --target codex
+prismtrace --console --target opencode
+prismtrace --console --target claude
+```
+
+## Observing AI Tools
+
+Run one observer command in a terminal while the target AI tool is running. Each observer writes local artifacts into `.prismtrace/state/artifacts/`, then the console reads those artifacts and projects sessions/events.
+
+Codex Desktop / Codex app-server observer:
+
+```bash
+cd /path/to/your/project
+prismtrace --codex-observe
+```
+
+If auto-discovery cannot find the Codex socket, pass it explicitly:
+
+```bash
+prismtrace --codex-observe --codex-socket /path/to/codex.sock
+```
+
+Claude Code transcript observer:
+
+```bash
+cd /path/to/your/project
+prismtrace --claude-observe
+```
+
+Use a custom transcript root when needed:
+
+```bash
+prismtrace --claude-observe --claude-transcript-root "$HOME/.claude/projects"
+```
+
+opencode server observer:
+
+```bash
+cd /path/to/your/project
+prismtrace --opencode-observe
+```
+
+By default PrismTrace reads opencode at `http://127.0.0.1:4096`. If opencode is serving elsewhere:
+
+```bash
+prismtrace --opencode-observe --opencode-url http://127.0.0.1:4096
+```
+
+Keep the console open in another terminal:
+
+```bash
+prismtrace --console
+```
+
+## Stored Data
+
+PrismTrace stores local state under:
+
+```text
+.prismtrace/state/
+```
+
+Important paths:
+
+- `.prismtrace/state/artifacts/`: raw observer artifacts and captured payload facts
+- `.prismtrace/state/observability.db`: local state database
+- `.prismtrace/state/index/`: projected session/event/capability read models
+
+To reset local PrismTrace data for a workspace:
+
+```bash
+rm -rf .prismtrace
+```
+
+## Current Alpha Limits
+
+- macOS only.
+- Release binaries are unsigned and not notarized.
+- Homebrew installs a prebuilt macOS binary selected by CPU architecture.
+- Observers are best-effort integrations against fast-moving AI tools.
+- `--attach <pid>` remains a bootstrap path for supported Node CLI targets; observer-first flows are preferred for Codex, Claude Code, and opencode.
+
 ## Longer-Term Vision
 
 PrismTrace is not only a payload capture utility. The broader direction is AI observability:

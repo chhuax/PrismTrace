@@ -79,6 +79,110 @@ prismtrace --claude-observe
 prismtrace --opencode-observe
 ```
 
+## 快速开始
+
+PrismTrace 是本地优先工具。建议在你想观测的项目目录里运行命令；PrismTrace 会把状态写到当前目录的 `.prismtrace/` 下。
+
+先确认能发现本机目标：
+
+```bash
+cd /path/to/your/project
+prismtrace --discover
+```
+
+启动本地控制台：
+
+```bash
+prismtrace --console
+```
+
+然后打开 `http://127.0.0.1:7799`。当前控制台会展示 discovered targets、observer/source health、sessions、timeline events、request details、capabilities 和 diagnostics。
+
+如果只想看某类目标：
+
+```bash
+prismtrace --console --target codex
+prismtrace --console --target opencode
+prismtrace --console --target claude
+```
+
+## 观测 AI 工具
+
+目标 AI 工具运行时，在另一个终端里运行对应 observer 命令。observer 会把本地 artifacts 写到 `.prismtrace/state/artifacts/`，控制台再读取这些 artifacts 并投影出 sessions/events。
+
+Codex Desktop / Codex app-server observer：
+
+```bash
+cd /path/to/your/project
+prismtrace --codex-observe
+```
+
+如果自动发现不到 Codex socket，可以显式指定：
+
+```bash
+prismtrace --codex-observe --codex-socket /path/to/codex.sock
+```
+
+Claude Code transcript observer：
+
+```bash
+cd /path/to/your/project
+prismtrace --claude-observe
+```
+
+需要自定义 transcript 目录时：
+
+```bash
+prismtrace --claude-observe --claude-transcript-root "$HOME/.claude/projects"
+```
+
+opencode server observer：
+
+```bash
+cd /path/to/your/project
+prismtrace --opencode-observe
+```
+
+默认读取 `http://127.0.0.1:4096`。如果 opencode 服务在其他地址：
+
+```bash
+prismtrace --opencode-observe --opencode-url http://127.0.0.1:4096
+```
+
+另开一个终端保持控制台运行：
+
+```bash
+prismtrace --console
+```
+
+## 本地数据位置
+
+PrismTrace 会把本地状态写在：
+
+```text
+.prismtrace/state/
+```
+
+几个重要路径：
+
+- `.prismtrace/state/artifacts/`：原始 observer artifacts 和捕获到的 payload facts
+- `.prismtrace/state/observability.db`：本地状态数据库
+- `.prismtrace/state/index/`：投影后的 session/event/capability read model
+
+如果想清空当前 workspace 的 PrismTrace 数据：
+
+```bash
+rm -rf .prismtrace
+```
+
+## 当前 Alpha 限制
+
+- 仅支持 macOS。
+- Release 二进制未签名、未 notarize。
+- Homebrew 会根据 CPU 架构安装对应的预编译 macOS 二进制。
+- observer 是针对快速变化 AI 工具的 best-effort 集成。
+- `--attach <pid>` 仍是面向部分 Node CLI 目标的 bootstrap 路径；Codex、Claude Code 和 opencode 优先使用 observer-first 流程。
+
 ## 长期方向
 
 PrismTrace 不只是一个 payload 抓取工具，它的长期方向是完整的 AI 应用可观测性：
