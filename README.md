@@ -31,13 +31,25 @@ PrismTrace V1 is scoped to:
 
 ## Alpha Install
 
-PrismTrace alpha releases are distributed as unsigned macOS tarballs. The first release kit targets Apple Silicon macOS (`aarch64-apple-darwin`). Homebrew, `.pkg`, `.dmg`, codesigning, and notarization are not available yet.
-
-Download the latest `prismtrace-*-aarch64-apple-darwin.tar.gz` archive from GitHub Releases, then install:
+PrismTrace alpha releases support Apple Silicon and Intel macOS. Homebrew is the recommended install path:
 
 ```bash
-tar -xzf prismtrace-*-aarch64-apple-darwin.tar.gz
-cd prismtrace-*-aarch64-apple-darwin
+brew install chhuax/tap/prismtrace
+```
+
+Unsigned macOS tarballs are also available from GitHub Releases for Apple Silicon (`aarch64-apple-darwin`) and Intel (`x86_64-apple-darwin`). `.pkg`, `.dmg`, codesigning, and notarization are not available yet.
+
+To install from a tarball, download the latest archive matching your Mac, then run:
+
+```bash
+case "$(uname -m)" in
+  arm64) target="aarch64-apple-darwin" ;;
+  x86_64) target="x86_64-apple-darwin" ;;
+  *) echo "unsupported macOS architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+
+tar -xzf prismtrace-*-"$target".tar.gz
+cd prismtrace-*-"$target"
 ./install.sh --prefix "$HOME/.local"
 ```
 

@@ -9,6 +9,12 @@ PrismTrace MUST provide a release kit that can package the current macOS CLI int
 - **AND** the archive contains a user-facing `prismtrace` executable
 - **AND** the archive contains installation and checksum files
 
+#### Scenario: Maintainer packages Apple Silicon and Intel release artifacts
+- **WHEN** the release workflow runs for a release tag
+- **THEN** it produces an Apple Silicon archive for `aarch64-apple-darwin`
+- **AND** it produces an Intel archive for `x86_64-apple-darwin`
+- **AND** each archive has its own `.sha256` checksum file
+
 ### Requirement: Installed command MUST be named prismtrace
 The user-facing installed command MUST be `prismtrace`, while existing developer entrypoints such as `prismtrace-host` MAY remain available for compatibility.
 
@@ -43,6 +49,7 @@ PrismTrace documentation MUST describe how users install the alpha release kit a
 
 #### Scenario: User reads the README for installation
 - **WHEN** a user opens the README
-- **THEN** it includes release installation commands
-- **AND** it states that the alpha release is macOS-focused and unsigned
+- **THEN** it includes Homebrew installation commands
+- **AND** it includes tarball fallback installation commands
+- **AND** it states that the alpha tarball release is macOS-focused and unsigned
 - **AND** it keeps local development commands separate from user installation commands
