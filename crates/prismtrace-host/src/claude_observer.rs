@@ -1080,12 +1080,11 @@ mod tests {
         let artifact = fs::read_to_string(writer.artifact_path())?;
         assert!(artifact.contains("\"record_type\":\"handshake\""));
         assert!(artifact.contains("\"record_type\":\"event\""));
-        assert!(
-            writer
-                .artifact_path()
-                .to_string_lossy()
-                .contains(".prismtrace/state/artifacts/observer_events/claude-code/")
-        );
+        let artifact_relative = writer
+            .artifact_path()
+            .strip_prefix(&result.storage.artifacts_dir)
+            .expect("artifact should live under the configured artifacts dir");
+        assert!(artifact_relative.starts_with("observer_events/claude-code"));
 
         fs::remove_dir_all(result.config.state_root)?;
         Ok(())
@@ -1095,7 +1094,8 @@ mod tests {
     fn run_claude_observer_writes_artifact_records() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = crate::bootstrap(&workspace_root)?;
-        let transcript_root = workspace_root.join("transcripts");
+        let transcript_parent = unique_test_dir();
+        let transcript_root = transcript_parent.join("transcripts");
         fs::create_dir_all(&transcript_root)?;
         let transcript = transcript_root.join("session.jsonl");
         fs::write(
@@ -1138,7 +1138,7 @@ mod tests {
         assert!(String::from_utf8_lossy(&output).contains("claude_observer_event"));
 
         fs::remove_dir_all(result.config.state_root)?;
-        fs::remove_dir_all(transcript_root)?;
+        fs::remove_dir_all(transcript_parent)?;
         Ok(())
     }
 
@@ -1412,7 +1412,8 @@ mod tests {
     -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = crate::bootstrap(&workspace_root)?;
-        let transcript_root = workspace_root.join("transcripts");
+        let transcript_parent = unique_test_dir();
+        let transcript_root = transcript_parent.join("transcripts");
         fs::create_dir_all(&transcript_root)?;
 
         let mut output = Vec::new();
@@ -1451,7 +1452,7 @@ mod tests {
         );
 
         fs::remove_dir_all(result.config.state_root)?;
-        fs::remove_dir_all(transcript_root)?;
+        fs::remove_dir_all(transcript_parent)?;
         Ok(())
     }
 

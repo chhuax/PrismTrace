@@ -37,11 +37,13 @@ pub use self::model::{
 };
 pub(crate) use self::observer::{load_observer_activity_items, load_observer_target_summaries};
 pub(crate) use self::page::render_console_homepage;
+#[cfg(test)]
+pub(crate) use self::payload::render_health_payload;
 pub(crate) use self::payload::{
-    append_filter_context_fields, render_activity_payload_from_items, render_health_payload,
-    render_request_detail_payload, render_requests_payload, render_session_detail_payload,
-    render_session_events_payload, render_sessions_payload_with_pagination,
-    render_targets_payload_from_summaries,
+    append_filter_context_fields, render_activity_payload_from_items,
+    render_health_payload_with_state_root, render_request_detail_payload, render_requests_payload,
+    render_session_detail_payload, render_session_events_payload,
+    render_sessions_payload_with_pagination, render_targets_payload_from_summaries,
 };
 pub(crate) use self::server::collect_console_snapshot_for_bind_addr;
 pub use self::server::{
@@ -335,11 +337,12 @@ fn render_console_route_response(
                 sort_target_summaries(&mut targets);
                 sort_activity_items(&mut activity_items);
             }
-            render_health_payload(
+            render_health_payload_with_state_root(
                 &targets,
                 &activity_items,
                 None,
                 snapshot.filter_context.as_ref(),
+                state_root_from_summary(&snapshot.summary).as_deref(),
             )
         }),
         Some(path) if path.starts_with("/api/events/") => {
@@ -758,6 +761,15 @@ fn request_path_only(url: &str) -> &str {
         .next()
         .filter(|path| !path.is_empty())
         .unwrap_or("/")
+}
+
+fn state_root_from_summary(summary: &str) -> Option<String> {
+    summary.lines().find_map(|line| {
+        line.strip_prefix("state root: ")
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    })
 }
 
 pub fn collect_target_summaries(

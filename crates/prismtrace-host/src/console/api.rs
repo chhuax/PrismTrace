@@ -25,7 +25,7 @@ pub(crate) fn load_read_model_request_summaries(
     storage: &StorageLayout,
     filter: Option<&ConsoleTargetFilterConfig>,
 ) -> Vec<ConsoleRequestSummary> {
-    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, storage.root.parent()) {
+    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, None) {
         return store
             .event_summaries(usize::MAX)
             .map(|events| {
@@ -58,7 +58,7 @@ pub(crate) fn load_read_model_session_summaries(
         return sessions;
     }
 
-    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, storage.root.parent()) {
+    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, None) {
         return store
             .session_summaries(usize::MAX)
             .map(|sessions| {
@@ -86,7 +86,7 @@ pub(crate) fn load_read_model_session_summaries(
 }
 
 fn load_codex_thread_session_summaries_from_state_db(
-    storage: &StorageLayout,
+    _storage: &StorageLayout,
     filter: Option<&ConsoleTargetFilterConfig>,
 ) -> Option<Vec<ConsoleSessionSummary>> {
     let codex_home = env::var_os("HOME")?;
@@ -95,14 +95,10 @@ fn load_codex_thread_session_summaries_from_state_db(
         return None;
     }
 
-    let workspace_root = storage.root.parent()?;
-    let query = format!(
-        "select id, rollout_path, title, first_user_message, cwd, created_at_ms, updated_at_ms \
+    let query = "select id, rollout_path, title, first_user_message, cwd, created_at_ms, updated_at_ms \
          from threads \
-         where archived = 0 and source in ('cli', 'vscode') and cwd = {} \
-         order by updated_at_ms desc;",
-        sqlite_string_literal(&workspace_root.display().to_string())
-    );
+         where archived = 0 and source in ('cli', 'vscode') \
+         order by updated_at_ms desc;";
     let output = Command::new("sqlite3")
         .arg("-batch")
         .arg("-noheader")
@@ -171,17 +167,13 @@ fn is_codex_thread_id(value: &str) -> bool {
         && value.chars().filter(|ch| *ch == '-').count() == 4
 }
 
-fn sqlite_string_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
-
 pub(crate) fn load_read_model_request_detail_payload(
     storage: &StorageLayout,
     request_id: &str,
     filter: Option<&ConsoleTargetFilterConfig>,
     filter_context: Option<&ConsoleFilterContext>,
 ) -> Option<String> {
-    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, storage.root.parent())
+    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, None)
         && let Ok(Some(event)) = store.event_detail(request_id)
     {
         if !read_model_event_detail_matches_filter(&event, filter) {
@@ -211,7 +203,7 @@ pub(crate) fn load_read_model_event_detail_payload(
     filter: Option<&ConsoleTargetFilterConfig>,
     filter_context: Option<&ConsoleFilterContext>,
 ) -> Option<String> {
-    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, storage.root.parent())
+    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, None)
         && let Ok(Some(event)) = store.event_detail(event_id)
     {
         if !read_model_event_detail_matches_filter(&event, filter) {
@@ -261,7 +253,7 @@ pub(crate) fn load_read_model_session_detail_payload(
         ));
     }
 
-    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, storage.root.parent())
+    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, None)
         && let Ok(Some(session)) = store.session_detail(session_id)
     {
         if !read_model_session_matches_filter(&session.summary, filter) {
@@ -306,7 +298,7 @@ pub(crate) fn load_read_model_session_events_payload(
         ));
     }
 
-    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, storage.root.parent())
+    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, None)
         && let Ok(Some(session)) = store.session_detail(session_id)
     {
         if !read_model_session_matches_filter(&session.summary, filter) {
@@ -355,7 +347,7 @@ pub(crate) fn load_session_capabilities_payload(
         ));
     }
 
-    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, storage.root.parent())
+    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, None)
         && let Ok(Some(session)) = store.session_detail(session_id)
     {
         if !read_model_session_matches_filter(&session.summary, filter) {
@@ -404,7 +396,7 @@ pub(crate) fn load_session_diagnostics_payload(
         ));
     }
 
-    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, storage.root.parent())
+    if let Ok(store) = ObservabilityIndexStore::load_read_store(storage, None)
         && let Ok(Some(session)) = store.session_detail(session_id)
     {
         if !read_model_session_matches_filter(&session.summary, filter) {

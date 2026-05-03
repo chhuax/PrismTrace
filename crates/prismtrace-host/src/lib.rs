@@ -18,8 +18,10 @@ pub mod sources;
 pub mod tool_visibility;
 
 pub use lifecycle::{
-    AppConfig, BootstrapResult, DEFAULT_BIND_ADDR, HostSnapshot, bootstrap, collect_host_snapshot,
-    discovery_report, run_claude_observer_session, run_codex_observer_session,
+    AppConfig, BootstrapResult, DEFAULT_BIND_ADDR, HostSnapshot, STATE_ROOT_ENV, bootstrap,
+    bootstrap_for_invocation, collect_host_snapshot, default_user_state_root,
+    default_user_state_root_from_home, discovery_report, import_legacy_workspace_artifacts,
+    resolve_state_root, run_claude_observer_session, run_codex_observer_session,
     run_opencode_observer_session, startup_summary,
 };
 

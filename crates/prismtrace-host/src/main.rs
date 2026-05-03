@@ -9,8 +9,9 @@ enum CommandSelection {
 }
 
 fn main() -> std::io::Result<()> {
-    let result = prismtrace_host::bootstrap(std::env::current_dir()?)?;
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let state_root = state_root_arg(&args)?.map(std::path::PathBuf::from);
+    let result = prismtrace_host::bootstrap_for_invocation(state_root, std::env::current_dir()?)?;
 
     match selected_command(&args)? {
         CommandSelection::Console(filters) => {
@@ -50,6 +51,10 @@ fn main() -> std::io::Result<()> {
             Ok(())
         }
     }
+}
+
+fn state_root_arg(args: &[String]) -> std::io::Result<Option<&str>> {
+    arg_value(args, "--state-root")
 }
 
 fn arg_value<'a>(args: &'a [String], flag: &str) -> std::io::Result<Option<&'a str>> {
@@ -187,7 +192,7 @@ fn opencode_observe_args(
 mod tests {
     use super::{
         CommandSelection, claude_observe_args, codex_observe_args, console_target_filters_arg,
-        opencode_observe_args, selected_command,
+        opencode_observe_args, selected_command, state_root_arg,
     };
 
     #[test]
@@ -239,6 +244,31 @@ mod tests {
             console_target_filters_arg(&args).expect("parse should succeed"),
             Some(vec!["codex".to_string(), "observer".to_string()])
         );
+    }
+
+    #[test]
+    fn state_root_arg_parses_explicit_state_root_without_affecting_command_selection() {
+        let args = vec![
+            "--console".to_string(),
+            "--state-root".to_string(),
+            "/tmp/prismtrace-state".to_string(),
+        ];
+
+        assert_eq!(
+            state_root_arg(&args).expect("parse should succeed"),
+            Some("/tmp/prismtrace-state")
+        );
+        assert_eq!(
+            selected_command(&args).expect("command should parse"),
+            CommandSelection::Console(None)
+        );
+    }
+
+    #[test]
+    fn state_root_arg_requires_value() {
+        let args = vec!["--state-root".to_string()];
+
+        assert!(state_root_arg(&args).is_err());
     }
 
     #[test]

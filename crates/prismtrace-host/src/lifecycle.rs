@@ -2,27 +2,25 @@ use crate::discovery::{ProcessSampleSource, discover_targets};
 use crate::sources;
 use prismtrace_core::ProcessTarget;
 use prismtrace_storage::StorageLayout;
+use std::env;
+use std::fs;
 use std::io;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const DEFAULT_BIND_ADDR: &str = "127.0.0.1:7799";
+pub const STATE_ROOT_ENV: &str = "PRISMTRACE_STATE_ROOT";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppConfig {
-    pub workspace_root: PathBuf,
     pub state_root: PathBuf,
     pub bind_addr: String,
 }
 
 impl AppConfig {
-    pub fn from_workspace_root(root: impl Into<PathBuf>) -> Self {
-        let workspace_root = root.into();
-        let state_root = workspace_root.join(".prismtrace");
-
+    pub fn from_state_root(state_root: impl Into<PathBuf>) -> Self {
         Self {
-            workspace_root,
-            state_root,
+            state_root: state_root.into(),
             bind_addr: DEFAULT_BIND_ADDR.to_string(),
         }
     }
@@ -40,8 +38,35 @@ pub struct HostSnapshot {
     pub discovered_targets: Vec<ProcessTarget>,
 }
 
-pub fn bootstrap(root: impl Into<PathBuf>) -> io::Result<BootstrapResult> {
-    let config = AppConfig::from_workspace_root(root);
+pub fn default_user_state_root_from_home(home: impl AsRef<Path>) -> PathBuf {
+    home.as_ref()
+        .join("Library")
+        .join("Application Support")
+        .join("PrismTrace")
+}
+
+pub fn default_user_state_root() -> io::Result<PathBuf> {
+    let home = env::var_os("HOME").ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "HOME is not set; pass --state-root <path>",
+        )
+    })?;
+    Ok(default_user_state_root_from_home(home))
+}
+
+pub fn resolve_state_root(explicit_state_root: Option<PathBuf>) -> io::Result<PathBuf> {
+    if let Some(state_root) = explicit_state_root {
+        return Ok(state_root);
+    }
+    if let Some(state_root) = env::var_os(STATE_ROOT_ENV) {
+        return Ok(PathBuf::from(state_root));
+    }
+    default_user_state_root()
+}
+
+pub fn bootstrap(state_root: impl Into<PathBuf>) -> io::Result<BootstrapResult> {
+    let config = AppConfig::from_state_root(state_root);
     let storage = StorageLayout::new(&config.state_root);
 
     storage.initialize()?;
@@ -49,9 +74,62 @@ pub fn bootstrap(root: impl Into<PathBuf>) -> io::Result<BootstrapResult> {
     Ok(BootstrapResult { config, storage })
 }
 
+pub fn bootstrap_for_invocation(
+    explicit_state_root: Option<PathBuf>,
+    invocation_cwd: impl AsRef<Path>,
+) -> io::Result<BootstrapResult> {
+    let state_root = resolve_state_root(explicit_state_root)?;
+    let result = bootstrap(state_root)?;
+    let legacy_root = invocation_cwd.as_ref().join(".prismtrace");
+    let _ = import_legacy_workspace_artifacts(&legacy_root, &result.storage);
+    Ok(result)
+}
+
+pub fn import_legacy_workspace_artifacts(
+    legacy_root: &Path,
+    storage: &StorageLayout,
+) -> io::Result<usize> {
+    if legacy_root == storage.root {
+        return Ok(0);
+    }
+
+    let source = legacy_root.join("state").join("artifacts");
+    if !source.is_dir() {
+        return Ok(0);
+    }
+
+    copy_missing_files_recursively(&source, &storage.artifacts_dir)
+}
+
+fn copy_missing_files_recursively(source: &Path, destination: &Path) -> io::Result<usize> {
+    let mut copied = 0;
+    fs::create_dir_all(destination)?;
+
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+
+        if source_path.is_dir() {
+            copied += copy_missing_files_recursively(&source_path, &destination_path)?;
+            continue;
+        }
+
+        if source_path.is_file() && !destination_path.exists() {
+            if let Some(parent) = destination_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&source_path, &destination_path)?;
+            copied += 1;
+        }
+    }
+
+    Ok(copied)
+}
+
 pub fn startup_summary(result: &BootstrapResult) -> String {
     format!(
-        "PrismTrace host skeleton\nbind: {}\nstate root: {}\ndb: {}\nartifacts: {}",
+        "PrismTrace host skeleton\nscope: local machine\nbind: {}\nstate root: {}\ndb: {}\nartifacts: {}",
         result.config.bind_addr,
         result.config.state_root.display(),
         result.storage.db_path.display(),
@@ -124,6 +202,7 @@ pub fn run_opencode_observer_session(
 mod tests {
     use super::{
         AppConfig, DEFAULT_BIND_ADDR, bootstrap, collect_host_snapshot,
+        default_user_state_root_from_home, import_legacy_workspace_artifacts,
         run_claude_observer_session, run_opencode_observer_session, startup_summary,
     };
     use crate::claude_observer::ClaudeObserverOptions;
@@ -138,26 +217,27 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn app_config_uses_a_hidden_state_directory_inside_the_workspace() {
-        let config = AppConfig::from_workspace_root("/tmp/prismtrace-workspace");
+    fn app_config_uses_explicit_state_root() {
+        let config = AppConfig::from_state_root("/tmp/prismtrace-state");
 
-        assert_eq!(
-            config.workspace_root,
-            PathBuf::from("/tmp/prismtrace-workspace")
-        );
-        assert_eq!(
-            config.state_root,
-            PathBuf::from("/tmp/prismtrace-workspace/.prismtrace")
-        );
+        assert_eq!(config.state_root, PathBuf::from("/tmp/prismtrace-state"));
         assert_eq!(config.bind_addr, DEFAULT_BIND_ADDR);
     }
 
     #[test]
-    fn bootstrap_creates_storage_under_the_hidden_state_directory() -> io::Result<()> {
-        let workspace_root = unique_test_dir();
-        let result = bootstrap(&workspace_root)?;
+    fn default_user_state_root_uses_macos_application_support() {
+        assert_eq!(
+            default_user_state_root_from_home("/Users/tester"),
+            PathBuf::from("/Users/tester/Library/Application Support/PrismTrace")
+        );
+    }
 
-        assert_eq!(result.config.workspace_root, workspace_root);
+    #[test]
+    fn bootstrap_creates_storage_under_the_state_root() -> io::Result<()> {
+        let state_root = unique_test_dir();
+        let result = bootstrap(&state_root)?;
+
+        assert_eq!(result.config.state_root, state_root);
         assert_eq!(
             result.storage.db_path,
             result
@@ -168,6 +248,49 @@ mod tests {
         );
         assert!(result.storage.artifacts_dir.is_dir());
 
+        fs::remove_dir_all(result.config.state_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn import_legacy_workspace_artifacts_copies_missing_files_without_overwrite() -> io::Result<()>
+    {
+        let legacy_workspace = unique_test_dir();
+        let state_root = unique_test_dir();
+        let result = bootstrap(&state_root)?;
+        let legacy_artifacts = legacy_workspace
+            .join(".prismtrace")
+            .join("state")
+            .join("artifacts")
+            .join("observer_events")
+            .join("opencode");
+        fs::create_dir_all(&legacy_artifacts)?;
+        fs::write(legacy_artifacts.join("session-1.jsonl"), "legacy\n")?;
+
+        let destination = result
+            .storage
+            .artifacts_dir
+            .join("observer_events")
+            .join("opencode");
+        fs::create_dir_all(&destination)?;
+        fs::write(destination.join("session-2.jsonl"), "existing\n")?;
+
+        let copied = import_legacy_workspace_artifacts(
+            &legacy_workspace.join(".prismtrace"),
+            &result.storage,
+        )?;
+
+        assert_eq!(copied, 1);
+        assert_eq!(
+            fs::read_to_string(destination.join("session-1.jsonl"))?,
+            "legacy\n"
+        );
+        assert_eq!(
+            fs::read_to_string(destination.join("session-2.jsonl"))?,
+            "existing\n"
+        );
+
+        fs::remove_dir_all(legacy_workspace)?;
         fs::remove_dir_all(result.config.state_root)?;
         Ok(())
     }
@@ -265,7 +388,7 @@ mod tests {
     fn run_claude_observer_session_passes_storage_to_artifact_writer() -> io::Result<()> {
         let workspace_root = unique_test_dir();
         let result = bootstrap(&workspace_root)?;
-        let transcript_root = workspace_root.join("transcripts");
+        let transcript_root = unique_test_dir().join("transcripts");
         fs::create_dir_all(&transcript_root)?;
         fs::write(
             transcript_root.join("session.jsonl"),

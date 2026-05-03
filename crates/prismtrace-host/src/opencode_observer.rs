@@ -931,12 +931,11 @@ mod tests {
         let artifact = std::fs::read_to_string(writer.artifact_path())?;
         assert!(artifact.contains("\"record_type\":\"handshake\""));
         assert!(artifact.contains("\"record_type\":\"event\""));
-        assert!(
-            writer
-                .artifact_path()
-                .to_string_lossy()
-                .contains(".prismtrace/state/artifacts/observer_events/opencode/")
-        );
+        let artifact_relative = writer
+            .artifact_path()
+            .strip_prefix(&result.storage.artifacts_dir)
+            .expect("artifact should live under the configured artifacts dir");
+        assert!(artifact_relative.starts_with("observer_events/opencode"));
         std::fs::remove_dir_all(result.config.state_root)?;
         Ok(())
     }
