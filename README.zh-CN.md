@@ -81,12 +81,11 @@ prismtrace --opencode-observe
 
 ## 快速开始
 
-PrismTrace 是本地优先工具。建议在你想观测的项目目录里运行命令；PrismTrace 会把状态写到当前目录的 `.prismtrace/` 下。
+PrismTrace 是本地优先工具。默认情况下，所有 observer 和 console 共享同一个用户级本机 store，所以命令不需要从同一个目录启动。
 
 先确认能发现本机目标：
 
 ```bash
-cd /path/to/your/project
 prismtrace --discover
 ```
 
@@ -108,12 +107,11 @@ prismtrace --console --target claude
 
 ## 观测 AI 工具
 
-目标 AI 工具运行时，在另一个终端里运行对应 observer 命令。observer 会把本地 artifacts 写到 `.prismtrace/state/artifacts/`，控制台再读取这些 artifacts 并投影出 sessions/events。
+目标 AI 工具运行时，在另一个终端里运行对应 observer 命令。observer 会把本地 artifacts 写到用户级 PrismTrace store，控制台再读取这些 artifacts 并投影出 sessions/events。
 
 Codex Desktop / Codex app-server observer：
 
 ```bash
-cd /path/to/your/project
 prismtrace --codex-observe
 ```
 
@@ -126,7 +124,6 @@ prismtrace --codex-observe --codex-socket /path/to/codex.sock
 Claude Code transcript observer：
 
 ```bash
-cd /path/to/your/project
 prismtrace --claude-observe
 ```
 
@@ -139,7 +136,6 @@ prismtrace --claude-observe --claude-transcript-root "$HOME/.claude/projects"
 opencode server observer：
 
 ```bash
-cd /path/to/your/project
 prismtrace --opencode-observe
 ```
 
@@ -160,19 +156,26 @@ prismtrace --console
 PrismTrace 会把本地状态写在：
 
 ```text
-.prismtrace/state/
+~/Library/Application Support/PrismTrace/state/
 ```
 
 几个重要路径：
 
-- `.prismtrace/state/artifacts/`：原始 observer artifacts 和捕获到的 payload facts
-- `.prismtrace/state/observability.db`：本地状态数据库
-- `.prismtrace/state/index/`：投影后的 session/event/capability read model
+- `~/Library/Application Support/PrismTrace/state/artifacts/`：原始 observer artifacts 和捕获到的 payload facts
+- `~/Library/Application Support/PrismTrace/state/observability.db`：本地状态数据库
+- `~/Library/Application Support/PrismTrace/state/index/`：投影后的 session/event/capability read model
 
-如果想清空当前 workspace 的 PrismTrace 数据：
+如果需要指定自定义 state 位置：
 
 ```bash
-rm -rf .prismtrace
+prismtrace --console --state-root /path/to/prismtrace-state
+PRISMTRACE_STATE_ROOT=/path/to/prismtrace-state prismtrace --opencode-observe
+```
+
+如果想清空本机 PrismTrace 数据：
+
+```bash
+rm -rf "$HOME/Library/Application Support/PrismTrace"
 ```
 
 ## 当前 Alpha 限制

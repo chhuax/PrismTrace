@@ -34,9 +34,7 @@ impl IndexReadStore {
                 &storage.events_index_path,
                 &storage.capabilities_index_path,
             )?,
-            workspace_root: workspace_root
-                .map(Path::to_path_buf)
-                .or_else(|| storage.root.parent().map(Path::to_path_buf)),
+            workspace_root: workspace_root.map(Path::to_path_buf),
         })
     }
 

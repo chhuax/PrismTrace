@@ -86,11 +86,7 @@ pub struct ObservabilityReadModel {
 impl ObservabilityReadModel {
     pub fn build(storage: &StorageLayout) -> io::Result<Self> {
         let codex_home = env::var_os("HOME").map(PathBuf::from);
-        Self::build_with_codex_home_and_workspace(
-            storage,
-            codex_home.as_deref(),
-            storage.root.parent(),
-        )
+        Self::build_with_codex_home_and_workspace(storage, codex_home.as_deref(), None)
     }
 
     pub fn build_with_codex_home(
@@ -242,7 +238,7 @@ impl ObservabilityReadModel {
 }
 
 pub(crate) fn load_codex_rollout_session_detail_from_state_db(
-    storage: &StorageLayout,
+    _storage: &StorageLayout,
     session_id: &str,
 ) -> io::Result<Option<SessionDetail>> {
     let Some(thread_id) = session_id.strip_prefix("codex-thread:") else {
@@ -260,18 +256,9 @@ pub(crate) fn load_codex_rollout_session_detail_from_state_db(
         return Ok(None);
     }
 
-    let workspace_root = storage.root.parent();
-    let cwd_clause = workspace_root
-        .map(|root| {
-            format!(
-                " and cwd = {}",
-                sqlite_string_literal(&root.display().to_string())
-            )
-        })
-        .unwrap_or_default();
     let query = format!(
         "select rollout_path from threads \
-         where archived = 0 and source in ('cli', 'vscode') and id = {}{cwd_clause} \
+         where archived = 0 and source in ('cli', 'vscode') and id = {} \
          limit 1;",
         sqlite_string_literal(thread_id)
     );
@@ -290,7 +277,7 @@ pub(crate) fn load_codex_rollout_session_detail_from_state_db(
     let Some(path) = stdout.lines().map(str::trim).find(|line| !line.is_empty()) else {
         return Ok(None);
     };
-    let Some(session) = read_codex_rollout_session(Path::new(path), workspace_root)? else {
+    let Some(session) = read_codex_rollout_session(Path::new(path), None)? else {
         return Ok(None);
     };
 
@@ -1496,6 +1483,67 @@ mod tests {
                 .event_detail("codex-thread:019dc5d0-7c22-7a03-84e9-e2671c6ffe03:1")
                 .is_none()
         );
+
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn default_codex_indexing_keeps_cwd_as_metadata_not_boundary() -> io::Result<()> {
+        let root = unique_test_dir();
+        let codex_home = root.join("home");
+        let active_dir = codex_home.join(".codex/sessions/2026/04");
+        fs::create_dir_all(&active_dir)?;
+        fs::write(
+            active_dir
+                .join("rollout-2026-04-30T00-00-00-019dd9fb-86a3-73b1-931a-2cb1b64bff98.jsonl"),
+            codex_session_jsonl_with_cwd("019dd9fb-86a3-73b1-931a-2cb1b64bff98", "/tmp/workspace"),
+        )?;
+        fs::write(
+            active_dir
+                .join("rollout-2026-04-30T00-00-00-019dc5d0-7c22-7a03-84e9-e2671c6ffe03.jsonl"),
+            codex_session_jsonl_with_cwd(
+                "019dc5d0-7c22-7a03-84e9-e2671c6ffe03",
+                "/tmp/other-workspace",
+            ),
+        )?;
+
+        let db_path = codex_home.join(".codex/state_5.sqlite");
+        let setup_sql = concat!(
+            "create table threads (id text, archived integer, source text, cwd text);",
+            "insert into threads values ('019dd9fb-86a3-73b1-931a-2cb1b64bff98', 0, 'vscode', '/tmp/workspace');",
+            "insert into threads values ('019dc5d0-7c22-7a03-84e9-e2671c6ffe03', 0, 'vscode', '/tmp/other-workspace');"
+        );
+        let Ok(status) = Command::new("sqlite3")
+            .arg(&db_path)
+            .arg(setup_sql)
+            .status()
+        else {
+            fs::remove_dir_all(root)?;
+            return Ok(());
+        };
+        if !status.success() {
+            fs::remove_dir_all(root)?;
+            return Ok(());
+        }
+
+        let storage = StorageLayout::new(root.join("global-state"));
+        let model = ObservabilityReadModel::build_with_codex_home_and_workspace(
+            &storage,
+            Some(&codex_home),
+            None,
+        )?;
+
+        let sessions = model.session_summaries(10);
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.iter().any(|session| {
+            session.session_id == "codex-thread:019dd9fb-86a3-73b1-931a-2cb1b64bff98"
+                && session.cwd.as_deref() == Some("/tmp/workspace")
+        }));
+        assert!(sessions.iter().any(|session| {
+            session.session_id == "codex-thread:019dc5d0-7c22-7a03-84e9-e2671c6ffe03"
+                && session.cwd.as_deref() == Some("/tmp/other-workspace")
+        }));
 
         fs::remove_dir_all(root)?;
         Ok(())

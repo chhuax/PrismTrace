@@ -7,11 +7,22 @@ use prismtrace_core::ProcessTarget;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
+#[cfg(test)]
 pub(crate) fn render_health_payload(
     targets: &[ConsoleTargetSummary],
     activity_items: &[ConsoleActivityItem],
     filter: Option<&ConsoleTargetFilterConfig>,
     filter_context: Option<&ConsoleFilterContext>,
+) -> String {
+    render_health_payload_with_state_root(targets, activity_items, filter, filter_context, None)
+}
+
+pub(crate) fn render_health_payload_with_state_root(
+    targets: &[ConsoleTargetSummary],
+    activity_items: &[ConsoleActivityItem],
+    filter: Option<&ConsoleTargetFilterConfig>,
+    filter_context: Option<&ConsoleFilterContext>,
+    state_root: Option<&str>,
 ) -> String {
     let filtered_targets = if let Some(filter) = filter {
         if filter.is_enabled() {
@@ -63,9 +74,17 @@ pub(crate) fn render_health_payload(
         .collect::<Vec<_>>();
 
     let mut payload = json!({
+        "state_root": state_root,
         "source_summary": source_summary,
         "errors": errors,
-        "empty_state": if source_summary.is_none() && errors.is_empty() { Some("尚未发现 source 健康或错误提示") } else { None::<&str> }
+        "empty_state": if source_summary.is_none() && errors.is_empty() {
+            Some(match state_root {
+                Some(root) => format!("尚未发现 source 健康或错误提示；当前 state root: {root}"),
+                None => "尚未发现 source 健康或错误提示".to_string(),
+            })
+        } else {
+            None::<String>
+        }
     });
     append_filter_context_fields(&mut payload, filter_context);
     payload.to_string()
